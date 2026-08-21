@@ -1,0 +1,64 @@
+# ============================================================
+# BLM ViT 单阶段图文对比学习 - 默认配置（学习版，单卡可跑）
+# 实际方案：QwenViT 替换 CLIP ViT 后，开源+业务混排直接 InfoNCE
+# ============================================================
+
+seed: 42
+
+model:
+  # ---------- 视觉塔 ----------
+  vision_type: qwenvit                 # qwenvit | timm（timm 为备用/调试用固定分辨率 ViT）
+  vision_name: Qwen/Qwen2.5-VL-3B-Instruct   # 取其 .visual 视觉塔；7B 亦可
+  timm_name: vit_base_patch16_224.augreg_in21k  # vision_type=timm 时生效
+  freeze_vision: false                 # 单阶段方案：双塔联合训练，不冻结
+
+  # ---------- 文本塔（从零训练的 Transformer Encoder）----------
+  text_tokenizer: Qwen/Qwen2.5-0.5B    # 复用 Qwen BPE 词表，便于后续 LLM 续训对齐
+  text_width: 512
+  text_layers: 12
+  text_heads: 8
+  text_max_len: 96
+
+  # ---------- 共享嵌入空间 ----------
+  embed_dim: 768
+  init_logit_scale: 0.07               # CLIP 惯例：tau 初值 0.07（存 log(1/tau)）
+  max_logit_scale: 100.0               # exp(logit_scale) 上限，防初期梯度过大
+
+data:
+  train_jsonl: data/train.jsonl        # 每行 {"image": "相对路径.jpg", "text": "caption"}
+  eval_jsonl:  data/eval.jsonl         # 同上；用于检索评估
+  image_root:  data/images             # 图片根目录
+  # ----- 动态分辨率（Qwen 风格 smart_resize，约束 merged-token 数）-----
+  min_pixels: 100352                   # = 128 * 28 * 28（下限 128 个 merged token）
+  max_pixels: 351232                   # = 448 * 28 * 28（上限 448，对齐业务图 392x224 规模）
+  patch_size: 14
+  merge_size: 2
+  num_workers: 4
+  # ----- binpack（step 级 token 均衡，稳定 GPU 利用率）-----
+  # 开启后 DataLoader 遍历 bin 列表（一个 bin = 一个 step），
+  # train.batch_size 失效，有效 batch = bin 的实际填充量
+  use_binpack: false
+  bin_strategy: online                 # online（业务数据，尺寸有上限）| offline（开源长尾，全局装箱）
+  bin_token: 28672                     # = 448 * 64（每桶容纳 64 张最大业务图的 token 预算）
+
+train:
+  output_dir: outputs/blm_vit_v1
+  batch_size: 64                       # 单步实际放入显存的图文对数
+  use_gradcache: true                  # 单卡大有效 batch：缓存梯度（GradCache）
+  gc_chunk_size: 16                    # GradCache 分块大小
+  accum_steps: 8                       # use_gradcache=false 时的梯度累积步数
+  # ----- 判别式学习率：视觉塔小 LR 保护预训练表征 -----
+  lr_vision: 1.0e-5
+  lr_text: 5.0e-5
+  lr_proj: 5.0e-5
+  weight_decay: 0.2
+  betas: [0.9, 0.98]                   # CLIP 原论文配置
+  eps: 1.0e-6
+  warmup_steps: 500
+  max_steps: 20000
+  grad_clip: 1.0
+  bf16: true
+  log_every: 20
+  eval_every: 1000
+  save_every: 2000
+  max_checkpoints: 3

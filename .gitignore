@@ -1,0 +1,23 @@
+# ===== 数据与产物（不入库）=====
+blm_clip/data/
+blm_clip/outputs/
+fg_clip/data/
+fg_clip/outputs/
+outputs/
+
+# ===== Python =====
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# ===== 系统与工具 =====
+.DS_Store
+.workbuddy/
+*.pt
+*.pth
+*.safetensors
+*.tokencache.json
+*.log
+.idea/

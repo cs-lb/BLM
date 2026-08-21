@@ -1,0 +1,52 @@
+# ============================================================
+# 冒烟配置：CPU / 小模型 / 200 步，验证 pipeline 与 loss 下降
+# ============================================================
+
+seed: 42
+
+model:
+  vision_type: timm                  # 冒烟用 timm 固定分辨率 ViT（免下载 3B 全模）
+  timm_name: vit_base_patch16_224.augreg_in21k
+  vision_name: Qwen/Qwen2.5-VL-3B-Instruct
+  freeze_vision: false
+
+  text_tokenizer: Qwen/Qwen2.5-0.5B
+  text_width: 256                    # 缩小文本塔，加速 CPU 冒烟
+  text_layers: 4
+  text_heads: 4
+  text_max_len: 64
+
+  embed_dim: 256
+  init_logit_scale: 0.07
+  max_logit_scale: 100.0
+
+data:
+  train_jsonl: data/train.jsonl
+  eval_jsonl:  data/eval.jsonl
+  image_root:  data/images
+  min_pixels: 100352
+  max_pixels: 351232
+  patch_size: 14
+  merge_size: 2
+  num_workers: 2
+
+train:
+  output_dir: outputs/smoke
+  batch_size: 16                     # batch=16 → ln(16)≈2.77 为初始 loss 参考
+  use_gradcache: false               # 冒烟不需要 GradCache
+  gc_chunk_size: 16
+  accum_steps: 1
+  lr_vision: 1.0e-5
+  lr_text: 5.0e-5
+  lr_proj: 5.0e-5
+  weight_decay: 0.2
+  betas: [0.9, 0.98]
+  eps: 1.0e-6
+  warmup_steps: 20
+  max_steps: 200
+  grad_clip: 1.0
+  bf16: false                        # CPU 冒烟用 fp32
+  log_every: 10
+  eval_every: 100
+  save_every: 200
+  max_checkpoints: 1
