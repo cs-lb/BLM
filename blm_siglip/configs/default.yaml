@@ -1,0 +1,53 @@
+# ============================================================
+# BLM 视觉基座预训练（SigLIP 版）- 8×H800 配置
+# QwenViT-7B 视觉塔 + BGE-M3 文本塔 + SigLIP 损失
+# ============================================================
+
+seed: 42
+
+model:
+  vision_type: qwenvit                       # qwenvit | timm（冒烟用）
+  vision_name: Qwen/Qwen2.5-VL-7B-Instruct   # 兜底：未抽取视觉权重时从全模加载
+  visual_weights: assets/qwenvit_7b_visual.pt  # 优先：extract_qwenvit.py 的抽取产物
+  timm_name: vit_base_patch16_224.augreg_in21k
+  freeze_vision: false
+
+  text_name: BAAI/bge-m3                     # 文本塔（SentencePiece 词表，与 Qwen 不同体系）
+  embed_dim: 1024                            # 共享嵌入空间（对齐 BGE-M3 输出宽度）
+
+  siglip_init_t: 10.0                        # SigLIP 温度初值（存 ln10）
+  siglip_init_b: -10.0                       # SigLIP 负偏置初值（论文口径）
+
+data:
+  train_jsonl: data/train.jsonl              # 公共+业务已按 8:2 配比混合并 shuffle
+  eval_jsonl:  data/eval.jsonl
+  image_root:  data/images
+  # ----- 动态分辨率（smart_resize，约束 merged-token 数）-----
+  min_pixels: 100352                         # = 128 * 28 * 28
+  max_pixels: 351232                         # = 448 * 28 * 28（业务图 392×224 上限）
+  patch_size: 14
+  merge_size: 2
+  num_workers: 8
+  # ----- binpack（step 级 token 均衡）-----
+  use_binpack: true
+  bin_strategy: online                       # 业务数据 | offline（开源长尾）
+  bin_token: 28672                           # = 448 * 64
+
+train:
+  output_dir: outputs/blm_vit_v1
+  batch_size: 64                             # use_binpack=false 时生效；binpack 模式下失效
+  accum_steps: 1
+  lr_vision: 1.0e-5                          # 双塔均预训练 → 对称小 LR
+  lr_text: 1.0e-5
+  lr_proj: 5.0e-5                            # 投影层 + SigLIP 标量
+  weight_decay: 0.2
+  betas: [0.9, 0.98]
+  eps: 1.0e-6
+  warmup_steps: 500
+  max_steps: 20000
+  grad_clip: 1.0
+  bf16: true
+  log_every: 20
+  eval_every: 1000
+  save_every: 2000
+  max_checkpoints: 3

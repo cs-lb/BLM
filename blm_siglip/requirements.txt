@@ -1,0 +1,13 @@
+# 与 blm_clip 相同依赖
+torch>=2.2.0
+torchvision>=0.17.0
+transformers>=4.49.0
+accelerate>=0.30.0
+timm>=0.9.0
+Pillow>=10.0.0
+numpy>=1.26.0
+PyYAML>=6.0.0
+tqdm>=4.66.0
+requests>=2.31.0
+binpacking>=1.5.0      # 离线全局装箱（bin_strategy=offline 时需要）
+sentencepiece>=0.2.0   # BGE-M3 分词器后端
