@@ -141,11 +141,18 @@ def main():
             print("[env] 非 CUDA 设备，视觉塔已转为 fp32")
 
     # 梯度检查点：24GB 级显存（如双卡 4090）省激活内存，代价约 +30% 计算
+    # DDP 下必须 use_reentrant=False，且 embedding 层需显式开输入梯度
     if cfg["train"].get("grad_checkpointing", False):
-        model.visual.visual.gradient_checkpointing_enable()
-        model.text.backbone.gradient_checkpointing_enable()
+        ckpt_kwargs = {"use_reentrant": False}
+        model.visual.visual.gradient_checkpointing_enable(
+            gradient_checkpointing_kwargs=ckpt_kwargs)
+        model.text.backbone.gradient_checkpointing_enable(
+            gradient_checkpointing_kwargs=ckpt_kwargs)
+        model.text.backbone.enable_input_require_grads()
+        if hasattr(model.visual.visual, "enable_input_require_grads"):
+            model.visual.visual.enable_input_require_grads()
         if rank == 0:
-            print("[env] 已开启梯度检查点（视觉塔 + 文本塔）")
+            print("[env] 已开启梯度检查点（视觉塔 + 文本塔，use_reentrant=False）")
 
     model.to(device)
     if is_dist:

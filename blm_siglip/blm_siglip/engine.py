@@ -90,7 +90,14 @@ class Trainer:
         self.output_dir = self.tcfg["output_dir"]
         if rank == 0:
             os.makedirs(self.output_dir, exist_ok=True)
+            # 训练指标持久化：loss 曲线/超参轨迹/评估结果，便于事后画曲线与排查
+            self.metrics_path = os.path.join(self.output_dir, "metrics.jsonl")
         self.use_bf16 = self.tcfg["bf16"] and device.type == "cuda"
+
+    def _log_metrics(self, record: dict):
+        """追加一行 JSON 到 metrics.jsonl（仅主进程调用）。"""
+        with open(self.metrics_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     def save_checkpoint(self, step: int):
         path = os.path.join(self.output_dir, f"ckpt_step{step}.pt")
@@ -128,7 +135,9 @@ class Trainer:
                 micro += 1
 
                 if micro % accum == 0:
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.tcfg["grad_clip"])
+                    # clip_grad_norm_ 返回裁剪前的总梯度范数，顺手记录用于异常监控
+                    grad_norm = torch.nn.utils.clip_grad_norm_(
+                        self.model.parameters(), self.tcfg["grad_clip"]).item()
                     self.optimizer.step()
                     self.scheduler.step()
                     self.optimizer.zero_grad(set_to_none=True)
@@ -147,10 +156,20 @@ class Trainer:
                             tau=f"{self.model.logit_scale.exp().item():.2f}",
                             b=f"{self.model.logit_bias.item():.2f}",
                             it_s=f"{running_n / max(1e-9, time.time() - t0):.2f}")
+                        self._log_metrics({
+                            "step": step, "loss": round(avg, 5),
+                            "lr": self.scheduler.get_last_lr()[0],
+                            "tau": round(self.model.logit_scale.exp().item(), 3),
+                            "bias": round(self.model.logit_bias.item(), 3),
+                            "grad_norm": round(grad_norm, 3),
+                            "samples_per_s": round(running_n / max(1e-9, time.time() - t0), 2),
+                        })
                     running_loss, running_n, t0 = 0.0, 0, time.time()
 
                 if self.rank == 0 and step > 0 and step % self.tcfg["eval_every"] == 0 and self.evaluator:
-                    tqdm.write(f"[step {step}] eval: {json.dumps(self.evaluator.run(), ensure_ascii=False)}")
+                    metrics = self.evaluator.run()
+                    tqdm.write(f"[step {step}] eval: {json.dumps(metrics, ensure_ascii=False)}")
+                    self._log_metrics({"step": step, "eval": metrics})
                 if self.rank == 0 and step > 0 and step % self.tcfg["save_every"] == 0:
                     self.save_checkpoint(step)
                 pbar.update(1 if step <= max_steps else 0)
@@ -161,4 +180,6 @@ class Trainer:
         if self.rank == 0:
             self.save_checkpoint(step)
             if self.evaluator:
-                print(f"[final] eval: {json.dumps(self.evaluator.run(), ensure_ascii=False)}")
+                final_metrics = self.evaluator.run()
+                print(f"[final] eval: {json.dumps(final_metrics, ensure_ascii=False)}")
+                self._log_metrics({"step": step, "final_eval": final_metrics})
