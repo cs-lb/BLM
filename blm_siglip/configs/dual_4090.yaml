@@ -1,0 +1,55 @@
+# ============================================================
+# 双卡 RTX 4090（2×24GB）分布式训练配置
+# 目标：跑通 DDP + 多卡负例同步（gather-with-grad）+ binpack
+# 用法：torchrun --nproc_per_node=2 train.py --config configs/dual_4090.yaml
+# ============================================================
+
+seed: 42
+
+model:
+  vision_type: qwenvit
+  vision_name: Qwen/Qwen2.5-VL-7B-Instruct
+  visual_weights: assets/qwenvit_7b_visual.pt   # 先在目标机器跑 extract_qwenvit.py
+  timm_name: vit_base_patch16_224.augreg_in21k
+  freeze_vision: false
+  text_name: BAAI/bge-m3
+  embed_dim: 1024
+  siglip_init_t: 10.0
+  siglip_init_b: -10.0
+
+data:
+  train_jsonl: data/train.jsonl
+  eval_jsonl:  data/eval.jsonl
+  image_root:  data/images
+  min_pixels: 100352
+  max_pixels: 351232                           # 448 merged tokens（业务图上限）
+  patch_size: 14
+  merge_size: 2
+  num_workers: 8
+  # ----- binpack：bin_token 取小档，给激活留显存 -----
+  use_binpack: true
+  bin_strategy: online
+  bin_token: 14336                             # = 448 * 32（正式 8 卡用 448*64）
+
+train:
+  output_dir: outputs/dual4090_v0
+  batch_size: 32                               # binpack 模式下失效
+  accum_steps: 2                               # 等效更大有效 batch
+  lr_vision: 1.0e-5
+  lr_text: 1.0e-5
+  lr_proj: 5.0e-5
+  weight_decay: 0.2
+  betas: [0.9, 0.98]
+  eps: 1.0e-6
+  warmup_steps: 200
+  max_steps: 5000
+  grad_clip: 1.0
+  bf16: true
+  log_every: 20
+  eval_every: 500
+  save_every: 1000
+  max_checkpoints: 3
+  # ----- 24GB 显存关键开关：梯度检查点 -----
+  # 双塔参数 ~1.24B + AdamW 状态（fp32 master+m+v ≈ 15GB），剩余给激活的空间有限；
+  # 开启后以约 +30% 计算换激活内存减半以上
+  grad_checkpointing: true

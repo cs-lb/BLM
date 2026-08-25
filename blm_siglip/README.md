@@ -58,3 +58,14 @@ python eval.py --config configs/default.yaml --ckpt outputs/blm_vit_v1/ckpt_step
 | BGE-M3 池化 | `models.py::BgeM3TextTower` | CLS 位（dense 检索标准取法），SentencePiece 词表勿与 Qwen 混用 |
 | merger 边界 | `models.py::QwenViTVisionTower` | pooler_output（merger 后）切分池化；区域特征需求才用 merger 前 |
 | binpack | 复用 `blm_clip/binpack.py` | 在线（业务）/离线（开源）两策略，DDP 各 rank 交错取 bin |
+
+## 环境变体配置
+
+| 配置 | 环境 | 用法 | 关键调整 |
+|---|---|---|---|
+| `configs/default.yaml` | 8×H800 正式 | `torchrun --nproc_per_node=8 train.py --config configs/default.yaml` | bin_token 28672 |
+| `configs/m1_pro.yaml` | M1 Pro 本地测试 | `python train.py --config configs/m1_pro.yaml` | MPS 后端、视觉塔自动转 fp32、token 预算压到 128、小 bin 验证链路 |
+| `configs/dual_4090.yaml` | 双卡 4090 (2×24GB) | `torchrun --nproc_per_node=2 train.py --config configs/dual_4090.yaml` | bin_token 14336 + 梯度检查点（24GB 显存关键开关） |
+
+数据通过软链共享：`blm_siglip/data -> ../blm_clip/data`。
+注意：双卡 4090 机器上需先跑 `scripts/extract_qwenvit.py` 生成视觉权重。

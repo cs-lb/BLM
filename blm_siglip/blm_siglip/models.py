@@ -50,18 +50,25 @@ class QwenViTVisionTower(nn.Module):
         self.proj = nn.Linear(self.visual.config.out_hidden_size, embed_dim, bias=False)
 
     def _load_extracted(self, ckpt_path: str):
-        """从抽取文件恢复：{'config': vision_config_dict, 'state_dict': ...}"""
+        """从抽取文件恢复：{'config': vision_config_dict, 'state_dict': ...}
+
+        类名兼容：transformers 4.x 为 Qwen2_5_VLVisionTransformerPretrainedModel，
+        5.x 改为 Qwen2_5_VisionTransformerPretrainedModel（少一个 L）。
+        """
         from transformers.models.qwen2_5_vl.configuration_qwen2_5_vl import Qwen2_5_VLVisionConfig
-        from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import (
-            Qwen2_5_VLVisionTransformerPretrainedModel,
-        )
+        import transformers.models.qwen2_5_vl.modeling_qwen2_5_vl as modeling
+        VisionCls = getattr(modeling, "Qwen2_5_VisionTransformerPretrainedModel", None) \
+            or getattr(modeling, "Qwen2_5_VLVisionTransformerPretrainedModel")
+
         payload = torch.load(ckpt_path, map_location="cpu", weights_only=False)
         vision_cfg = Qwen2_5_VLVisionConfig(**payload["config"])
-        self.visual = Qwen2_5_VLVisionTransformerPretrainedModel(vision_cfg)
+        self.visual = VisionCls(vision_cfg)
         self.visual.load_state_dict(payload["state_dict"])
 
     def forward(self, pixel_values: torch.Tensor, grid_thw: torch.Tensor) -> torch.Tensor:
         """pixel_values: [Σpatches, 1176]；grid_thw: [B, 3]。返回 [B, embed_dim]。"""
+        # MPS 不支持 int64/float64：grid_thw 统一转 int32（数值范围远无溢出风险）
+        grid_thw = grid_thw.to(device=pixel_values.device, dtype=torch.int32)
         feats = self.visual(pixel_values, grid_thw=grid_thw)
         if not torch.is_tensor(feats):
             feats = feats.pooler_output          # merger 后 token；别拿 last_hidden_state

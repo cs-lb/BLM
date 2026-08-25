@@ -1,0 +1,53 @@
+# ============================================================
+# M1 Pro 单卡本地测试配置（Apple Silicon，MPS 后端）
+# 目标：验证完整链路（动态分辨率 packing + SigLIP + 评估），不追求速度
+# 用法：python train.py --config configs/m1_pro.yaml
+# ============================================================
+
+seed: 42
+
+model:
+  vision_type: qwenvit
+  vision_name: Qwen/Qwen2.5-VL-7B-Instruct
+  visual_weights: assets/qwenvit_7b_visual.pt   # 必须先跑 extract_qwenvit.py
+  timm_name: vit_base_patch16_224.augreg_in21k
+  freeze_vision: false
+  text_name: BAAI/bge-m3
+  embed_dim: 1024
+  siglip_init_t: 10.0
+  siglip_init_b: -10.0
+
+data:
+  train_jsonl: data/train.jsonl                # 本地复用 blm_clip/data（软链或拷贝）
+  eval_jsonl:  data/eval.jsonl
+  image_root:  data/images
+  # ----- 小 token 预算：M1 Pro 算力有限，压小单步成本 -----
+  min_pixels: 100352                           # 128 merged tokens
+  max_pixels: 100352                           # 上限也压到 128（≈280×280），正式为 448
+  patch_size: 14
+  merge_size: 2
+  num_workers: 2
+  # ----- binpack 开启但用小 bin，验证装箱链路 -----
+  use_binpack: true
+  bin_strategy: online
+  bin_token: 7168                              # = 448 * 16
+
+train:
+  output_dir: outputs/m1_test
+  batch_size: 8                                # binpack 模式下失效（由 bin 决定）
+  accum_steps: 1
+  lr_vision: 1.0e-5
+  lr_text: 1.0e-5
+  lr_proj: 5.0e-5
+  weight_decay: 0.2
+  betas: [0.9, 0.98]
+  eps: 1.0e-6
+  warmup_steps: 20
+  max_steps: 50
+  grad_clip: 1.0
+  bf16: false                                  # MPS 走 fp32（train.py 自动转视觉塔 fp32）
+  log_every: 5
+  eval_every: 25
+  save_every: 50
+  max_checkpoints: 1
+  grad_checkpointing: false                    # M1 Pro 统一内存较大，可不省；显存紧张再开

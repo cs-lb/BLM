@@ -40,6 +40,15 @@ def parse_args():
     return p.parse_args()
 
 
+def pick_device() -> torch.device:
+    """设备选择：CUDA > MPS（Apple Silicon）> CPU。"""
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
 def main():
     args = parse_args()
     with open(args.config, "r", encoding="utf-8") as f:
@@ -58,7 +67,7 @@ def main():
         device = torch.device("cuda", rank)
     else:
         rank = 0
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = pick_device()
 
     seed = cfg["seed"] + rank
     random.seed(seed); np.random.seed(seed)
@@ -124,6 +133,20 @@ def main():
 
     # ---- 模型 ----
     model = BLMSiglipModel(cfg)
+
+    # MPS/CPU 环境：bf16 权重与算子支持不全，强制 fp32（M1 Pro 本地测试场景）
+    if device.type in ("mps", "cpu") and cfg["model"]["vision_type"] == "qwenvit":
+        model.visual.to(torch.float32)
+        if rank == 0:
+            print("[env] 非 CUDA 设备，视觉塔已转为 fp32")
+
+    # 梯度检查点：24GB 级显存（如双卡 4090）省激活内存，代价约 +30% 计算
+    if cfg["train"].get("grad_checkpointing", False):
+        model.visual.visual.gradient_checkpointing_enable()
+        model.text.backbone.gradient_checkpointing_enable()
+        if rank == 0:
+            print("[env] 已开启梯度检查点（视觉塔 + 文本塔）")
+
     model.to(device)
     if is_dist:
         model = torch.nn.parallel.DistributedDataParallel(

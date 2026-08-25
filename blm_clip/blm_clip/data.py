@@ -237,14 +237,24 @@ class ClipCollator:
         }
 
 
+def _move_tensor(t: torch.Tensor, device) -> torch.Tensor:
+    """单张量搬移。MPS 不支持 int64/float64，统一降级为 int32/float32。"""
+    if device.type == "mps":
+        if t.dtype == torch.int64:
+            t = t.to(torch.int32)
+        elif t.dtype == torch.float64:
+            t = t.to(torch.float32)
+    return t.to(device, non_blocking=True)
+
+
 def move_batch_to_device(batch: Dict, device) -> Dict:
-    """把 collator 产出的异构 batch 搬到 GPU。"""
+    """把 collator 产出的异构 batch 搬到 GPU/MPS。"""
     out = {}
     for k, v in batch.items():
         if isinstance(v, torch.Tensor):
-            out[k] = v.to(device, non_blocking=True)
+            out[k] = _move_tensor(v, device)
         elif isinstance(v, (list, tuple)):
-            out[k] = type(v)(x.to(device, non_blocking=True) for x in v)
+            out[k] = type(v)(_move_tensor(x, device) for x in v)
         else:
             out[k] = v
     return out
