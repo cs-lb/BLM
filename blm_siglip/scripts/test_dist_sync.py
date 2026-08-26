@@ -40,8 +40,10 @@ def main():
 
     torch.manual_seed(42 + rank)                # 数据各卡不同（模拟各自 bin）
     x = torch.randn(n, 1024, device=device)
-    img_z = F.normalize(model(x), dim=-1)
-    txt_z = F.normalize(model(x + 0.05 * torch.randn_like(x)), dim=-1)
+    # 注意：前向必须走 ddp(x) 而非 model(x)——绕过 DDP 前向会让
+    # reducer 对这次 backward 的 all-reduce 时序不可控（check3 的教训）
+    img_z = F.normalize(ddp(x), dim=-1)
+    txt_z = F.normalize(ddp(x + 0.05 * torch.randn_like(x)), dim=-1)
 
     logit_scale = torch.nn.Parameter(torch.log(torch.tensor(10.0, device=device)))
     logit_bias = torch.nn.Parameter(torch.tensor(-10.0, device=device))
@@ -53,15 +55,22 @@ def main():
     if rank == 0:
         print(f"[check1] 各卡样本数 counts = {counts}（应为 [10, 9]）")
     print(f"[check2] rank{rank} gathered shape = {tuple(gathered.shape)}"
-          f"（应为 [19, 1024]），mask 有效位 = {int(mask.sum())}（应为 19）")
+          f"（应为 [2×max_n=20, 1024]，含 1 行填充），"
+          f"mask 有效位 = {int(mask.sum())}（应为 19）")
 
-    # ---------- check3：loss + DDP 梯度平均 ----------
+    # ---------- check3：loss + DDP 梯度平均（加屏障后比对梯度张量本体）----------
     loss_fn = SiglipLoss(use_dist=True)
     loss = loss_fn(img_z, txt_z, logit_scale, logit_bias)
     loss.backward()
+    torch.cuda.synchronize()
+    dist.barrier()                              # 等两卡 all-reduce 全部落定再读梯度
+    g_local = model.weight.grad.detach().clone()
+    g_remote = g_local.clone()
+    dist.broadcast(g_remote, src=0)             # 拿 rank0 的梯度来逐元素比对
+    same = torch.allclose(g_local, g_remote, atol=1e-7)
     gnorm = model.weight.grad.norm().item()
-    print(f"[check3] rank{rank} loss = {loss.item():.4f}, "
-          f"grad_norm = {gnorm:.6f}（两卡打印值应完全一致 → all-reduce 成功）")
+    print(f"[check3] rank{rank} loss = {loss.item():.4f}, grad_norm = {gnorm:.6f}, "
+          f"与 rank0 梯度逐元素一致: {same}（True → all-reduce 成功）")
 
     # ---------- check4：参数同步（各自用同步后的梯度走一步，参数应仍一致）----------
     with torch.no_grad():
