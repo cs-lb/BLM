@@ -11,3 +11,4 @@ tqdm>=4.66.0
 requests>=2.31.0
 binpacking>=1.5.0      # 离线全局装箱（bin_strategy=offline 时需要）
 sentencepiece>=0.2.0   # BGE-M3 分词器后端
+bitsandbytes>=0.43.0   # 8-bit AdamW（仅 CUDA；24GB 显卡必需，Mac 无需安装，代码自动回退 fp32 AdamW）

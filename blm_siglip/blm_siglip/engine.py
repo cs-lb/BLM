@@ -66,7 +66,7 @@ class Evaluator:
 
 class Trainer:
     def __init__(self, model, cfg: dict, train_loader, eval_loader, device,
-                 is_dist=False, rank=0):
+                 is_dist=False, rank=0, start_step: int = 0):
         self.model = model
         self.cfg = cfg
         self.tcfg = cfg["train"]
@@ -78,14 +78,33 @@ class Trainer:
         self.loss_fn = SiglipLoss(use_dist=is_dist)
         self.evaluator = Evaluator(model, eval_loader, device) if eval_loader is not None else None
 
-        self.optimizer = torch.optim.AdamW(
+        # 24GB 级显卡（双卡 4090）：fp32 AdamW 的 m+v 状态 ~7.3GB（0.91B 参数），
+        # 叠加 fp32 权重+梯度与 bf16 激活后 OOM。8-bit AdamW 把状态压到 1/4（~1.9GB），
+        # 精度基本无损（bitsandbytes 官方口径，LLM 微调标配）。
+        # 无 bitsandbytes 的环境（如 Mac MPS）自动回退原版 AdamW，可用 optim_8bit: false 关闭。
+        optim_cls = torch.optim.AdamW
+        if self.tcfg.get("optim_8bit", True) and device.type == "cuda":
+            try:
+                import bitsandbytes as bnb
+                optim_cls = bnb.optim.AdamW8bit
+            except ImportError:
+                if rank == 0:
+                    print("[env] 未安装 bitsandbytes，回退 fp32 AdamW"
+                          "（24GB 显卡建议 pip install bitsandbytes）")
+        if rank == 0:
+            print(f"[env] optimizer = {optim_cls.__name__}")
+
+        self.optimizer = optim_cls(
             model.param_groups(self.tcfg["lr_vision"], self.tcfg["lr_text"],
                                self.tcfg["lr_proj"], self.tcfg["weight_decay"]),
             betas=tuple(self.tcfg["betas"]), eps=self.tcfg["eps"],
         )
+        # 断点续训：start_step>0 时调度器直接快进到对应位置（LR 不重走 warmup）
+        self.start_step = start_step
         self.scheduler = torch.optim.lr_scheduler.LambdaLR(
             self.optimizer,
             lambda s: cosine_warmup_lambda(s, self.tcfg["warmup_steps"], self.tcfg["max_steps"]),
+            last_epoch=start_step - 1,
         )
         self.output_dir = self.tcfg["output_dir"]
         if rank == 0:
@@ -100,10 +119,30 @@ class Trainer:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     def save_checkpoint(self, step: int):
+        """原子写入 + 失败容错：磁盘满等 IO 故障只告警跳过，不中断训练。
+
+        教训（2026-08-26 双 4090 事故）：直接 torch.save 到已满磁盘，
+        留下半截 ckpt 且训练进程崩溃（损失 2000 步进度）。
+        """
         path = os.path.join(self.output_dir, f"ckpt_step{step}.pt")
-        torch.save({"step": step, "model": self.model.state_dict(),
-                    "optimizer": self.optimizer.state_dict(), "config": self.cfg}, path)
-        ckpts = sorted(f for f in os.listdir(self.output_dir) if f.startswith("ckpt_step"))
+        tmp = path + ".tmp"
+        try:
+            torch.save({"step": step, "model": self.model.state_dict(),
+                        "optimizer": self.optimizer.state_dict(), "config": self.cfg}, tmp)
+            os.replace(tmp, path)          # 原子替换：要么完整新文件，要么保留旧文件
+        except (RuntimeError, OSError) as e:
+            for p in (tmp, path):
+                if os.path.exists(p):
+                    try:
+                        os.remove(p)       # 清掉半截文件，避免误当有效 ckpt resume
+                    except OSError:
+                        pass
+            print(f"[warn] checkpoint 保存失败（step {step}）：{e}，已跳过本次保存", flush=True)
+            return None
+        # 按步数数值排序清理旧 ckpt（字典序会把 step1000 排在 step20 前面，是错的）
+        ckpts = [f for f in os.listdir(self.output_dir)
+                 if f.startswith("ckpt_step") and f.endswith(".pt")]
+        ckpts.sort(key=lambda f: int(f[len("ckpt_step"):-len(".pt")]))
         while len(ckpts) > self.tcfg["max_checkpoints"]:
             os.remove(os.path.join(self.output_dir, ckpts.pop(0)))
         return path
@@ -114,10 +153,11 @@ class Trainer:
         accum = self.tcfg["accum_steps"]
 
         self.model.train()
-        step, micro = 0, 0
+        step, micro = self.start_step, 0       # 续训从断点步数继续（LR 已在对应位置）
         running_loss, running_n = 0.0, 0
         t0 = time.time()
-        pbar = tqdm(total=max_steps, desc="train", disable=self.rank != 0)
+        pbar = tqdm(total=max_steps, initial=self.start_step,
+                    desc="train", disable=self.rank != 0)
 
         while step < max_steps:
             for batch in self.train_loader:

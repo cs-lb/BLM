@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-细粒度图文对齐训练入口（方案第 6 章）
-========================================
+细粒度图文对齐训练入口（FG-CLIP 论文版，arXiv 2505.05071）
+================================================================
 在 blm_clip 的 BLMClipModel 基础上，加入区域级监督：
-    L = L_global（CLIP InfoNCE）+ λ1 * L_region（区域 InfoNCE）+ λ2 * L_hard（难负例 margin）
+    L = L_global（CLIP InfoNCE）+ 0.1 * L_region（区域对称 InfoNCE）
+        + 0.5 * L_hard（每区域 M 路单向 softmax 分类，式 4）
+FG 阶段为单卡设计：区域/难负例监督在 batch 内区域对上做，
+不依赖全局负例，无需多卡负例同步。
 
 数据：fg_data 生产线产出的 fg_train.jsonl
     {"image", "caption", "regions": [{"expr", "bbox", "conf", "hard": [...]}]}
@@ -32,7 +35,7 @@ from blm_clip.losses import ClipLoss  # noqa: E402
 from blm_clip.models import BLMClipModel  # noqa: E402
 
 from fg_clip.region import (  # noqa: E402
-    encode_regions, hard_negative_margin_loss, region_infonce_loss,
+    encode_regions, fgclip_hard_loss, region_infonce_loss,
 )
 from fg_data.common import read_jsonl  # noqa: E402
 
@@ -72,30 +75,26 @@ class FGCollator:
         global_batch = self.clip_collator(
             [{"image": self._load(b), "text": b["text"]} for b in batch])
 
-        # ---- 区域监督：拍平所有图的区域与难负例 ----
-        regions_per_image, pos_texts, hard_texts, hard_region_idx = [], [], [], []
+        # ---- 区域监督：每区候选描述 = [正例 expr, 难负例1, 难负例2, ...] 连续排布 ----
+        # FG-CLIP 式（4）要求每区第 0 条为正例；pos 文本即各区候选的首条，无需另编码
+        regions_per_image, cand_texts, cand_counts = [], [], []
         for b in batch:
             bboxes = []
             for r in b["regions"]:
-                region_id = len(pos_texts)
                 bboxes.append(r["bbox"])
-                pos_texts.append(r["expr"])
-                for h in r["hard"]:
-                    hard_texts.append(h)
-                    hard_region_idx.append(region_id)
+                cand_texts.append(r["expr"])          # 第 0 条 = 正例
+                cand_texts.extend(r["hard"])          # 后接 M-1 条改写难负例
+                cand_counts.append(1 + len(r["hard"]))
             regions_per_image.append(bboxes)
 
-        pos_enc = self._tokenize_list(pos_texts) if pos_texts else None
-        hard_enc = self._tokenize_list(hard_texts) if hard_texts else None
+        cand_enc = self._tokenize_list(cand_texts) if cand_texts else None
 
         return {
             **global_batch,
             "regions_per_image": regions_per_image,
-            "pos_ids": pos_enc["input_ids"] if pos_enc else None,
-            "pos_mask": pos_enc["attention_mask"] if pos_enc else None,
-            "hard_ids": hard_enc["input_ids"] if hard_enc else None,
-            "hard_mask": hard_enc["attention_mask"] if hard_enc else None,
-            "hard_region_idx": torch.tensor(hard_region_idx, dtype=torch.long),
+            "cand_ids": cand_enc["input_ids"] if cand_enc else None,
+            "cand_mask": cand_enc["attention_mask"] if cand_enc else None,
+            "cand_counts": torch.tensor(cand_counts, dtype=torch.long),
         }
 
     def _load(self, sample: dict):
@@ -192,11 +191,9 @@ def main():
             if step >= tc["max_steps"]:
                 break
             regions_per_image = batch.pop("regions_per_image")
-            hard_region_idx = batch.pop("hard_region_idx").to(device)
-            pos_ids = batch.pop("pos_ids").to(device)
-            pos_mask = batch.pop("pos_mask").to(device)
-            hard_ids = batch.pop("hard_ids").to(device)
-            hard_mask = batch.pop("hard_mask").to(device)
+            cand_ids = batch.pop("cand_ids").to(device)
+            cand_mask = batch.pop("cand_mask").to(device)
+            cand_counts = batch.pop("cand_counts").to(device)
             batch = move_batch_to_device(batch, device)
 
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=use_bf16):
@@ -209,13 +206,15 @@ def main():
                 region_z = torch.nn.functional.normalize(
                     encode_regions(model, batch["image_inputs"], regions_per_image, region_proj),
                     dim=-1)
-                pos_z = model.encode_text(pos_ids, pos_mask)
+                # 候选描述一次编码：各区第 0 条即正例（L_region 用），全部参与 L_hard 分类
+                cand_z = model.encode_text(cand_ids, cand_mask)
+                starts = torch.cumsum(cand_counts, dim=0) - cand_counts
+                pos_z = cand_z[starts]
                 l_region = region_infonce_loss(region_z, pos_z, model.clamped_logit_scale())
 
-                # 难负例 margin 损失
-                hard_z = model.encode_text(hard_ids, hard_mask)
-                l_hard = hard_negative_margin_loss(
-                    region_z, pos_z, hard_z, hard_region_idx, margin=tc["hard_margin"])
+                # 难负例 M 路分类损失（FG-CLIP 式 4，单向 softmax）
+                l_hard = fgclip_hard_loss(region_z, cand_z, cand_counts,
+                                          model.clamped_logit_scale())
 
                 loss = (l_global + tc["lambda_region"] * l_region
                         + tc["lambda_hard"] * l_hard) / tc["accum_steps"]

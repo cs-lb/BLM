@@ -3,7 +3,7 @@ blm_clip/data/
 blm_clip/outputs/
 fg_clip/data/
 fg_clip/outputs/
-outputs/
+#outputs/
 
 # ===== Python =====
 __pycache__/

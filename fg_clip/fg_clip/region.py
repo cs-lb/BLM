@@ -7,11 +7,10 @@
     bbox（归一化）→ 映射到 (gh, gw) patch 网格 → 覆盖 patch 取均值 → 区域投影层。
     与全局 embedding 共用同一嵌入空间（独立的 region_proj，merger 前 hidden 维）。
 
-损失（方案第 5 章）：
-    L = L_global + λ1 * L_region + λ2 * L_hard
-    - L_region：区域-表达式的批内 InfoNCE；
-    - L_hard：难负例 margin 排序损失
-      L_hard = mean( max(0, m + cos(r, e_hard) - cos(r, e_pos)) )，m=0.2。
+损失（FG-CLIP 论文版，arXiv 2505.05071）：
+    L = L_global + α * L_region + β * L_hard，α=0.1，β=0.5
+    - L_region：区域-表达式的批内对称 InfoNCE（式 3）；
+    - L_hard：每区域 M 路单向 softmax 分类（式 4，1 正 + M-1 改写难负例）。
 """
 
 import torch
@@ -77,19 +76,27 @@ def region_infonce_loss(region_z: torch.Tensor, expr_z: torch.Tensor,
     return 0.5 * (F.cross_entropy(logits, labels) + F.cross_entropy(logits.t(), labels))
 
 
-def hard_negative_margin_loss(region_z: torch.Tensor, pos_z: torch.Tensor,
-                              hard_z: torch.Tensor, hard_region_idx: torch.Tensor,
-                              margin: float = 0.2) -> torch.Tensor:
-    """难负例 margin 排序损失（方案公式）：
-        L = mean( max(0, m + cos(r, e_hard) - cos(r, e_pos)) )
+def fgclip_hard_loss(region_z: torch.Tensor, cand_z: torch.Tensor,
+                     cand_counts: torch.Tensor, logit_scale: torch.Tensor) -> torch.Tensor:
+    """难负例 M 路 softmax 分类损失（FG-CLIP 论文式 4，单向）：
+        L = -(1/K) Σ_i log [ exp(s(r_i, l_i,1)/τ) / Σ_j exp(s(r_i, l_i,j)/τ) ]
+
+    每个区域的 M_i 条候选描述（第 0 条正例 + M_i-1 条属性改写难负例）放进
+    同一个 softmax 竞争。相对 margin hinge 的优势：
+      - 正例与所有难负例持续竞争，每条难负例都贡献梯度（hinge 分对即零梯度）；
+      - 分数经同一 τ 标定，跨样本可比（缓解"比烂"/校准问题）。
 
     参数：
-        region_z:        [M, D] 区域特征（已归一化）
-        pos_z:           [M, D] 正例表达式特征（已归一化）
-        hard_z:          [ΣK, D] 所有难负例表达式特征（已归一化）
-        hard_region_idx: [ΣK] 每条难负例所属的区域下标
+        region_z:    [K, D] 区域特征（已归一化）
+        cand_z:      [ΣM_i, D] 候选描述特征，按区域连续排布，每区第 0 条为正例
+        cand_counts: [K] 每个区域的候选数 M_i
+        logit_scale: 共享温度（与全局/区域 InfoNCE 同一个 logit_scale）
     """
-    s_pos = (region_z * pos_z).sum(dim=-1)                        # [M]
-    s_hard = (hard_z * region_z[hard_region_idx]).sum(dim=-1)     # [ΣK]
-    losses = F.relu(margin + s_hard - s_pos[hard_region_idx])
-    return losses.mean()
+    tau = logit_scale.exp()
+    losses, offset = [], 0
+    for i, m in enumerate(cand_counts.tolist()):
+        logits = tau * (cand_z[offset:offset + m] @ region_z[i])      # [M_i]
+        target = torch.zeros(1, dtype=torch.long, device=logits.device)
+        losses.append(F.cross_entropy(logits.unsqueeze(0), target))
+        offset += m
+    return torch.stack(losses).mean()

@@ -69,10 +69,14 @@ def main():
     try:
         import spacy
         nlp = spacy.load(pc["spacy_model"])
+        # 功能性探测：zh_core_web_sm 能加载，但 noun_chunks 对中文未实现（spaCy E894），
+        # "加载成功"不代表"可用"——用一句样例实际调用一次验证
+        list(nlp("一个红色的球在桌子上").noun_chunks)
         print(f"[info] 使用 spaCy 模型 {pc['spacy_model']}")
-    except Exception:
-        print(f"[warn] spaCy 模型 {pc['spacy_model']} 不可用，降级为正则兜底抽取；"
-              f"建议安装：python -m spacy download {pc['spacy_model']}")
+    except Exception as e:
+        nlp = None
+        print(f"[warn] spaCy 模型 {pc['spacy_model']} 不可用（{type(e).__name__}: {e}），"
+              f"降级为正则兜底抽取；如需句法级抽取可换支持 noun_chunks 的模型")
 
     results = []
     n_expr_total = 0

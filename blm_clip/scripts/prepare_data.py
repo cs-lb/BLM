@@ -170,7 +170,7 @@ def main():
         with open(path, "w", encoding="utf-8") as f:
             for r in recs:
                 f.write(json.dumps(r, ensure_ascii=False) + "\n")
-        print(f"[done] {path}: {len(recs)} 条1")
+        print(f"[done] {path}: {len(recs)} 条1   ")
 
     print(f"[done] 图片目录: {image_dir}（{len(seen)} 张，已按 sha1 去重）")
     print("提示：首次训练会自动统计 token 数并缓存到 train.jsonl.tokencache.json")

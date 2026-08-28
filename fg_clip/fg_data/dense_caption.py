@@ -15,6 +15,8 @@ import argparse
 import os
 
 from tqdm import tqdm
+import torch
+from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
 
 from .common import load_config, read_jsonl, resolve_image, write_jsonl
 
@@ -32,8 +34,6 @@ PROMPT = (
 # ---------------------------------------------------------------
 class LocalQwenCaptioner:
     def __init__(self, model_name: str):
-        import torch
-        from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
 
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
@@ -42,7 +42,6 @@ class LocalQwenCaptioner:
         self.processor = AutoProcessor.from_pretrained(model_name)
 
     def caption(self, image_path: str, max_new_tokens: int) -> str:
-        import torch
         messages = [{
             "role": "user",
             "content": [
@@ -62,20 +61,20 @@ class LocalQwenCaptioner:
 # ---------------------------------------------------------------
 # 后端二：DashScope API（无本地算力时）
 # ---------------------------------------------------------------
-class DashScopeCaptioner:
-    def __init__(self, model: str):
-        import dashscope  # pip install dashscope；需环境变量 DASHSCOPE_API_KEY
-        self.dashscope = dashscope
-        self.model = model
-
-    def caption(self, image_path: str, max_new_tokens: int) -> str:
-        from dashscope import MultiModalConversation
-        resp = MultiModalConversation.call(
-            model=self.model,
-            messages=[{"role": "user", "content": [
-                {"image": f"file://{image_path}"}, {"text": PROMPT}]}],
-        )
-        return resp["output"]["choices"][0]["message"]["content"][0]["text"].strip()
+# class DashScopeCaptioner:
+#     def __init__(self, model: str):
+#         import dashscope  # pip install dashscope；需环境变量 DASHSCOPE_API_KEY
+#         self.dashscope = dashscope
+#         self.model = model
+#
+#     def caption(self, image_path: str, max_new_tokens: int) -> str:
+#         from dashscope import MultiModalConversation
+#         resp = MultiModalConversation.call(
+#             model=self.model,
+#             messages=[{"role": "user", "content": [
+#                 {"image": f"file://{image_path}"}, {"text": PROMPT}]}],
+#         )
+#         return resp["output"]["choices"][0]["message"]["content"][0]["text"].strip()
 
 
 def quality_filter(caption: str, min_len: int = 20) -> bool:
@@ -99,8 +98,8 @@ def main():
 
     if pc["caption_backend"] == "local":
         captioner = LocalQwenCaptioner(pc["caption_model"])
-    else:
-        captioner = DashScopeCaptioner(pc["dashscope_model"])
+    # else:
+    #     captioner = DashScopeCaptioner(pc["dashscope_model"])
 
     results, skipped = [], 0
     for s in tqdm(samples, desc="dense caption"):

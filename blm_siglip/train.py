@@ -162,14 +162,16 @@ def main():
     else:
         raw_model = model
 
+    start_step = 0
     if args.resume:
-        ckpt = torch.load(args.resume, map_location="cpu")
+        ckpt = torch.load(args.resume, map_location="cpu", weights_only=False)
         raw_model.load_state_dict(ckpt["model"])
+        start_step = int(ckpt.get("step", 0))
         if rank == 0:
-            print(f"[resume] 从 {args.resume} 恢复（step {ckpt.get('step')}）")
+            print(f"[resume] 从 {args.resume} 恢复（step {start_step}，LR 调度同步快进）")
 
     trainer = Trainer(raw_model, cfg, train_loader, eval_loader, device,
-                      is_dist=is_dist, rank=rank)
+                      is_dist=is_dist, rank=rank, start_step=start_step)
     if args.resume and "optimizer" in ckpt:
         trainer.optimizer.load_state_dict(ckpt["optimizer"])
     trainer.train()
