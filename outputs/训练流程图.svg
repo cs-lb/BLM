@@ -1,0 +1,77 @@
+<svg viewBox="0 0 680 676" width="680" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,'PingFang SC','Microsoft YaHei',sans-serif">
+  <rect width="680" height="676" fill="#fafbfc"/>
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="#5F5E5A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+  <rect x="60" y="40" width="240" height="56" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+  <text x="180" y="58" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#0C447C">fg_train.jsonl</text>
+  <text x="180" y="76" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#185FA5">图+caption+区域(expr/bbox/hard)</text>
+  <path d="M300 68 L336 68" fill="none" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#arr)"/>
+  <rect x="340" y="40" width="280" height="56" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+  <text x="480" y="58" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#0C447C">FGCollator</text>
+  <text x="480" y="76" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#185FA5">全局图文打包 + pos/hard 拍平 tokenize</text>
+
+  <path d="M180 96 L196 150" fill="none" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="158" y="126" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#444441">图像</text>
+  <path d="M480 96 L490 150" fill="none" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="508" y="126" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#444441">文本</text>
+
+  <rect x="40" y="126" width="600" height="210" rx="20" fill="#F1EFE8" stroke="#B4B2A9" stroke-width="0.5"/>
+  <text x="60" y="146" dominant-baseline="central" font-size="12" fill="#444441">前向传播（双塔权重共享；区域路径多一次视觉前向，max_regions 控开销）</text>
+
+  <rect x="60" y="156" width="280" height="160" rx="12" fill="#B5D4F4" stroke="#185FA5" stroke-width="0.5"/>
+  <text x="200" y="174" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#042C53">视觉塔（QwenViT）</text>
+  <rect x="76" y="186" width="248" height="56" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+  <text x="200" y="204" text-anchor="middle" dominant-baseline="central" font-size="13" font-weight="500" fill="#0C447C">全局路径</text>
+  <text x="200" y="222" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#185FA5">merger 后池化 → img_z</text>
+  <rect x="76" y="250" width="248" height="56" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+  <text x="200" y="268" text-anchor="middle" dominant-baseline="central" font-size="13" font-weight="500" fill="#0C447C">区域路径</text>
+  <text x="200" y="286" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#185FA5">merger前patch→bbox池化→region_proj</text>
+
+  <rect x="360" y="156" width="260" height="160" rx="12" fill="#B5D4F4" stroke="#185FA5" stroke-width="0.5"/>
+  <text x="490" y="174" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#042C53">文本塔（同一塔三次调用）</text>
+  <rect x="376" y="186" width="228" height="120" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+  <text x="490" y="208" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#0C447C">caption → txt_z</text>
+  <text x="490" y="234" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#0C447C">expr 正例 → pos_z</text>
+  <text x="490" y="260" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#0C447C">hard 难负例 → hard_z</text>
+  <text x="490" y="286" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#185FA5">（全部 L2 归一化）</text>
+
+  <path d="M135 336 L135 366" fill="none" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="142" y="352" dominant-baseline="central" font-size="12" fill="#444441">img_z · txt_z</text>
+  <path d="M210 336 L318 366" fill="none" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="238" y="348" dominant-baseline="central" font-size="12" fill="#444441">region_z · pos_z</text>
+  <path d="M490 336 L540 366" fill="none" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="474" y="352" text-anchor="end" dominant-baseline="central" font-size="12" fill="#444441">region_z · hard_z（idx 索引）</text>
+
+  <rect x="40" y="372" width="190" height="56" rx="8" fill="#FAECE7" stroke="#993C1D" stroke-width="0.5"/>
+  <text x="135" y="390" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#712B13">L_global</text>
+  <text x="135" y="408" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#993C1D">图↔文 对称 InfoNCE</text>
+  <rect x="245" y="372" width="190" height="56" rx="8" fill="#FAECE7" stroke="#993C1D" stroke-width="0.5"/>
+  <text x="340" y="390" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#712B13">λ₁=0.5 · L_region</text>
+  <text x="340" y="408" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#993C1D">区域↔expr 批内 InfoNCE</text>
+  <rect x="450" y="372" width="190" height="56" rx="8" fill="#FAECE7" stroke="#993C1D" stroke-width="0.5"/>
+  <text x="545" y="390" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#712B13">λ₂=1.0 · L_hard</text>
+  <text x="545" y="408" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#993C1D">margin=0.2 hinge 排序</text>
+
+  <path d="M135 428 L272 448" fill="none" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#arr)"/>
+  <path d="M340 428 L340 448" fill="none" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#arr)"/>
+  <path d="M545 428 L408 448" fill="none" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <rect x="180" y="452" width="320" height="44" rx="8" fill="#F5C4B3" stroke="#993C1D" stroke-width="0.5"/>
+  <text x="340" y="474" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#4A1B0C">L = L_global + 0.5·L_region + 1.0·L_hard</text>
+
+  <path d="M340 496 L340 516" fill="none" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <rect x="180" y="520" width="320" height="56" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+  <text x="340" y="538" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#0C447C">backward → clip_grad → AdamW</text>
+  <text x="340" y="556" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#185FA5">判别式 LR + cosine warmup，accum_steps 累积</text>
+
+  <path d="M340 576 L340 596" fill="none" stroke="#B4B2A9" stroke-width="0.5" stroke-dasharray="4 3" marker-end="url(#arr)"/>
+
+  <rect x="180" y="600" width="320" height="56" rx="8" fill="#F1EFE8" stroke="#888780" stroke-width="0.5"/>
+  <text x="340" y="618" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#2C2C2A">周期评估 + checkpoint</text>
+  <text x="340" y="636" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#5F5E5A">验收红线：全局 hit@5 不低于 FG 训练前</text>
+</svg>

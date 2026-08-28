@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>细粒度图文对齐（FG-CLIP）全流程详解</title>
+<style>
+  :root{
+    --bg:#fafbfc; --panel:#ffffff; --border:#e2e8f0;
+    --text:#1e293b; --muted:#64748b; --accent:#2563eb; --accent-bg:#eff6ff;
+    --green:#059669; --green-bg:#ecfdf5; --orange:#d97706; --orange-bg:#fffbeb;
+    --red:#dc2626; --red-bg:#fef2f2; --purple:#7c3aed; --purple-bg:#f5f3ff;
+    --code-bg:#f6f8fa; --code-border:#d0d7de;
+    --c-kw:#d73a49; --c-str:#032f62; --c-cmt:#6a737d; --c-fn:#6f42c1; --c-num:#005cc5;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);line-height:1.8;font-size:15px}
+  .container{max-width:980px;margin:0 auto;padding:40px 28px 80px}
+  h1{font-size:30px;margin-bottom:8px;color:#0f172a}
+  h2{font-size:22px;margin:48px 0 16px;padding-bottom:8px;border-bottom:2px solid var(--accent);color:#0f172a}
+  h3{font-size:17px;margin:28px 0 10px;color:#1e3a8a}
+  h4{font-size:15px;margin:20px 0 8px;color:#334155}
+  p{margin:10px 0}
+  .subtitle{color:var(--muted);font-size:15px;margin-bottom:32px}
+  code{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:0.9em;background:#f1f5f9;padding:2px 6px;border-radius:4px;color:#c7254e}
+  pre{background:var(--code-bg);border:1px solid var(--code-border);border-radius:8px;padding:18px 20px;overflow-x:auto;margin:14px 0;font-size:13px;line-height:1.65}
+  pre code{background:none;padding:0;color:#24292f;font-size:13px}
+  .c-kw{color:var(--c-kw)} .c-str{color:var(--c-str)} .c-cmt{color:var(--c-cmt);font-style:italic}
+  .c-fn{color:var(--c-fn)} .c-num{color:var(--c-num)}
+  .file-tag{display:inline-block;background:#0f172a;color:#fff;font-family:Menlo,monospace;font-size:12px;padding:3px 10px;border-radius:4px 4px 0 0;margin-bottom:-1px;position:relative;top:4px}
+  table{border-collapse:collapse;width:100%;margin:16px 0;font-size:14px;background:var(--panel)}
+  th{background:var(--accent-bg);color:#1e3a8a;padding:10px 12px;border:1px solid var(--border);text-align:left}
+  td{padding:9px 12px;border:1px solid var(--border);vertical-align:top}
+  tr:nth-child(even) td{background:#f8fafc}
+  .box{border-radius:8px;padding:14px 18px;margin:14px 0;border-left:4px solid}
+  .box-blue{background:var(--accent-bg);border-color:var(--accent)}
+  .box-green{background:var(--green-bg);border-color:var(--green)}
+  .box-orange{background:var(--orange-bg);border-color:var(--orange)}
+  .box-red{background:var(--red-bg);border-color:var(--red)}
+  .box-purple{background:var(--purple-bg);border-color:var(--purple)}
+  .box b{display:block;margin-bottom:4px}
+  .flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;margin:20px 0}
+  .flow .step{flex:1;min-width:150px;background:var(--panel);border:1.5px solid var(--border);border-radius:8px;padding:12px 14px;text-align:center;position:relative}
+  .flow .step .no{display:inline-block;width:22px;height:22px;line-height:22px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;font-weight:700;margin-bottom:6px}
+  .flow .step .t{font-weight:600;font-size:14px}
+  .flow .step .d{font-size:12px;color:var(--muted);margin-top:4px}
+  .flow .arrow{align-self:center;color:var(--accent);font-size:20px;padding:0 6px;font-weight:700}
+  .formula{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:16px 22px;margin:14px 0;text-align:center;font-size:16px;overflow-x:auto}
+  .formula .note{display:block;font-size:13px;color:var(--muted);margin-top:6px;text-align:left}
+  .toc{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:18px 24px;margin:24px 0}
+  .toc a{color:var(--accent);text-decoration:none}
+  .toc a:hover{text-decoration:underline}
+  .toc ol{padding-left:22px}
+  .tag{display:inline-block;font-size:12px;padding:1px 8px;border-radius:10px;background:#e0e7ff;color:#3730a3;margin-right:4px}
+  ul,ol{padding-left:24px;margin:8px 0}
+  li{margin:4px 0}
+  .kpi{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}
+  .kpi .card{flex:1;min-width:180px;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:14px 16px}
+  .kpi .card .v{font-size:22px;font-weight:700;color:var(--accent)}
+  .kpi .card .k{font-size:13px;color:var(--muted)}
+  .foot{margin-top:60px;padding-top:16px;border-top:1px solid var(--border);color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>细粒度图文对齐（FG-CLIP）全流程详解</h1>
+<p class="subtitle">从"整图对整句"到"区域对短语"：数据生产线 × 区域特征 × 三损失联合训练 —— 对应本工作区 <code>fg_clip/</code> 实现，损失函数已对齐 <b>FG-CLIP 论文原版</b>（arXiv 2505.05071, ICML 2025）</p>
+
+<div class="toc">
+<b style="display:block;margin-bottom:8px">目录</b>
+<ol>
+  <li><a href="#s1">为什么需要细粒度对齐：全局 CLIP 的盲区</a></li>
+  <li><a href="#s2">总体架构：一条数据生产线 + 三个训练损失</a></li>
+  <li><a href="#s3">数据生产线 Step 1：Dense Caption 详细描述生成</a></li>
+  <li><a href="#s4">数据生产线 Step 2：引用表达式抽取</a></li>
+  <li><a href="#s5">数据生产线 Step 3：Grounding 边界框定位</a></li>
+  <li><a href="#s6">数据生产线 Step 4：难负例构造</a></li>
+  <li><a href="#s7">区域特征提取：bbox → patch 网格池化（含错位处理）</a></li>
+  <li><a href="#s8">三个损失（FG-CLIP 论文版）：L_global + 0.1·L_regional + 0.5·L_hard</a></li>
+  <li><a href="#s9">完整训练循环（带注释）</a></li>
+  <li><a href="#s10">评估、消融与面试话术</a></li>
+</ol>
+</div>
+
+<!-- ==================== S1 ==================== -->
+<h2 id="s1">1. 为什么需要细粒度对齐：全局 CLIP 的盲区</h2>
+
+<p>标准 CLIP 做的是<b>全局对齐</b>：整张图压成一个向量，整句文本压成一个向量，用 InfoNCE 拉近正样本对。这对"图里有没有猫"这类粗粒度检索很有效，但有一个系统性盲区——模型只要抓住<b>主导物体</b>就能拿高分，完全不需要理解属性、数量、空间关系。</p>
+
+<table>
+  <tr><th style="width:22%">维度</th><th>全局 CLIP（粗粒度）</th><th>FG-CLIP（细粒度）</th></tr>
+  <tr><td>对齐单元</td><td>整图 ↔ 整句</td><td>图像区域（bbox）↔ 引用表达式（短语）</td></tr>
+  <tr><td>监督信号</td><td>图文对（image-caption pair）</td><td>区域-表达式对 + 难负例（hard negatives）</td></tr>
+  <tr><td>典型失败案例</td><td>"红球"和"蓝球"的相似度几乎一样（词袋效应）</td><td>通过属性改写的难负例强制区分颜色/动作/数量</td></tr>
+  <tr><td>损失函数</td><td>L_global（批内 InfoNCE）</td><td>L_global + α·L_regional + β·L_hard（α=0.1，β=0.5）</td></tr>
+  <tr><td>数据成本</td><td>互联网爬取，噪声大但便宜</td><td>需要一条自动生产线：描述→抽取→定位→改写</td></tr>
+</table>
+
+<div class="box box-red">
+<b>一个直觉例子</b>
+给 CLIP 看一张"穿蓝色 T 恤的男人在绿草地上玩红球"的图，再给它两句话：<br>
+① "一个穿蓝色 T 恤的男人" &nbsp;② "一个穿绿色 T 恤的男人"<br>
+全局 CLIP 对两者的打分往往相差无几——因为"男人"这个词主导了相似度。细粒度对齐的目标就是让模型对 ① 显著高于 ②，且这个"高"要能在同一个 softmax 里把 ② 压下去。
+</div>
+
+<div class="box box-blue">
+<b>面试一句话版本</b>
+FG-CLIP 的核心观察：CLIP 的对比学习目标只约束全局语义，细粒度判别信号在训练数据里根本不存在——所以要<b>显式制造</b>区域级监督（grounding）和细粒度负样本（hard negative），用额外的损失项注入到训练里。训练上分两阶段：先全局对齐塑形，再低学习率叠加区域监督防遗忘。
+</div>
+
+<!-- ==================== S2 ==================== -->
+<h2 id="s2">2. 总体架构：一条数据生产线 + 三个训练损失</h2>
+
+<p>整个方案分两段：<b>离线数据生产线</b>把普通图文对升级成带区域标注和难负例的细粒度数据；<b>在线训练</b>在原有全局 CLIP 损失上叠加区域级损失。损失设计已对齐 FG-CLIP 论文（式 2~5）。</p>
+
+<h3>2.1 数据生产线（离线，五步）</h3>
+<div class="flow">
+  <div class="step"><div class="no">1</div><div class="t">Dense Caption</div><div class="d">Qwen2.5-VL 生成<br>详细描述</div></div>
+  <div class="arrow">→</div>
+  <div class="step"><div class="no">2</div><div class="t">表达式抽取</div><div class="d">SpaCy noun_chunks<br>+ 修饰语过滤</div></div>
+  <div class="arrow">→</div>
+  <div class="step"><div class="no">3</div><div class="t">Grounding</div><div class="d">YOLO-World 定位<br>NMS + conf&gt;0.4</div></div>
+  <div class="arrow">→</div>
+  <div class="step"><div class="no">4</div><div class="t">难负例</div><div class="d">LLM 改写 + 校验<br>（词表兜底）</div></div>
+  <div class="arrow">→</div>
+  <div class="step" style="border-color:var(--green)"><div class="no" style="background:var(--green)">5</div><div class="t">fg_train.jsonl</div><div class="d">最终训练数据</div></div>
+</div>
+
+<h3>2.2 训练目标（在线，FG-CLIP 论文式 5）</h3>
+<div class="formula">
+  L = L<sub>global</sub> + α · L<sub>regional</sub> + β · L<sub>hard</sub>，　α = 0.1，β = 0.5
+  <span class="note">L_global：整图-整句对比损失（保住原有能力）；L_regional：区域-表达式的批内对称 InfoNCE（论文式 3）；L_hard：每个区域的 M 条候选描述做<b>单向 softmax 分类</b>（论文式 4，1 正例 + M−1 条属性改写难负例在同一 softmax 竞争）。α、β 为论文消融确定的最优权重。</span>
+</div>
+
+<h3>2.3 数据格式（生产线最终产物）</h3>
+<div class="file-tag">data/fg/fg_train.jsonl（每行一个样本）</div>
+<pre><code>{
+  <span class="c-str">"image"</span>: <span class="c-str">"3f9a1c.jpg"</span>,
+  <span class="c-str">"caption"</span>: <span class="c-str">"一个穿着蓝色T恤的男人在绿色草地上玩红色的球"</span>,
+  <span class="c-str">"regions"</span>: [
+    {
+      <span class="c-str">"expr"</span>: <span class="c-str">"穿着蓝色T恤的男人"</span>,            <span class="c-cmt">// 正例引用表达式（候选描述第 0 条）</span>
+      <span class="c-str">"bbox"</span>: [<span class="c-num">0.31</span>, <span class="c-num">0.12</span>, <span class="c-num">0.55</span>, <span class="c-num">0.86</span>],  <span class="c-cmt">// 归一化坐标 [x1,y1,x2,y2]</span>
+      <span class="c-str">"conf"</span>: <span class="c-num">0.62</span>,                       <span class="c-cmt">// 检测置信度</span>
+      <span class="c-str">"hard"</span>: [<span class="c-str">"穿着绿色T恤的男人"</span>, <span class="c-str">"穿着蓝色T恤的女人"</span>]  <span class="c-cmt">// M-1 条难负例</span>
+    }
+  ]
+}</code></pre>
+
+<div class="kpi">
+  <div class="card"><div class="v">conf &gt; 0.4</div><div class="k">grounding 置信度阈值，低于则丢弃该表达式</div></div>
+  <div class="card"><div class="v">1 正 + 2 负</div><div class="k">每区域 M 条候选描述（hard_neg_per_expr=2）</div></div>
+  <div class="card"><div class="v">α=0.1 / β=0.5</div><div class="k">区域损失与难负例损失权重（论文式 5）</div></div>
+  <div class="card"><div class="v">lr ÷ 10~100</div><div class="k">Stage2 相对基座降学习率，防细粒度训练冲掉全局能力</div></div>
+</div>
+
+<!-- ==================== S3 ==================== -->
+<h2 id="s3">3. Step 1：Dense Caption 详细描述生成</h2>
+
+<p><b>为什么需要这一步？</b>原始图文对的 caption 通常很短（"一个男人在玩球"），没有属性信息，后面抽不出细粒度表达式。所以第一步用多模态大模型把每张图重新描述一遍，强制覆盖「物体 + 属性 + 动作 + 场景」。论文中这一步对应 CogVLM2-19B 对 LAION-2B 的 16 亿条重写——我们用 Qwen2.5-VL-3B 做同思路的小规模复现。</p>
+
+<div class="file-tag">fg_data/dense_caption.py —— 核心 prompt 与本地后端</div>
+<pre><code><span class="c-cmt"># 关键在 prompt 设计：四点要求逼模型输出属性密集的描述</span>
+PROMPT = (
+    <span class="c-str">"请详细描述这张图片，要求：\n"</span>
+    <span class="c-str">"1. 列出图中所有主要物体，并说明其颜色、材质、状态等属性；\n"</span>
+    <span class="c-str">"2. 描述物体的动作和相互关系；\n"</span>
+    <span class="c-str">"3. 描述场景环境；\n"</span>
+    <span class="c-str">"4. 输出一段连贯文字，不要列表，不要分点。"</span>   <span class="c-cmt"># 连贯文字便于下一步 SpaCy 句法分析</span>
+)
+
+<span class="c-kw">class</span> <span class="c-fn">LocalQwenCaptioner</span>:
+    <span class="c-cmt">"""本地 Qwen2.5-VL 后端（3B 已缓存可直接跑；无算力时换 DashScope API）"""</span>
+    <span class="c-kw">def</span> <span class="c-fn">caption</span>(self, image_path: <span class="c-fn">str</span>, max_new_tokens: <span class="c-fn">int</span>) -&gt; <span class="c-fn">str</span>:
+        messages = [{
+            <span class="c-str">"role"</span>: <span class="c-str">"user"</span>,
+            <span class="c-str">"content"</span>: [
+                {<span class="c-str">"type"</span>: <span class="c-str">"image"</span>, <span class="c-str">"image"</span>: <span class="c-str">f"file://{image_path}"</span>},
+                {<span class="c-str">"type"</span>: <span class="c-str">"text"</span>,  <span class="c-str">"text"</span>: PROMPT},
+            ],
+        }]
+        <span class="c-cmt"># apply_chat_template 拼好对话模板，processor 同时处理图像和文本</span>
+        text = self.processor.apply_chat_template(
+            messages, tokenize=<span class="c-kw">False</span>, add_generation_prompt=<span class="c-kw">True</span>)
+        inputs = self.processor(text=[text], images=[image_path],
+                                return_tensors=<span class="c-str">"pt"</span>).to(self.device)
+        <span class="c-kw">with</span> torch.no_grad():
+            <span class="c-cmt"># do_sample=False：贪心解码，数据生产要稳定可复现，不要随机性</span>
+            out = self.model.generate(**inputs, max_new_tokens=max_new_tokens,
+                                      do_sample=<span class="c-kw">False</span>)
+        <span class="c-cmt"># 切掉 prompt 部分，只保留模型新生成的 token</span>
+        gen_ids = out[<span class="c-num">0</span>][inputs[<span class="c-str">"input_ids"</span>].shape[<span class="c-num">1</span>]:]
+        <span class="c-kw">return</span> self.processor.decode(gen_ids, skip_special_tokens=<span class="c-kw">True</span>).strip()
+
+<span class="c-kw">def</span> <span class="c-fn">quality_filter</span>(caption: <span class="c-fn">str</span>, min_len: <span class="c-fn">int</span> = <span class="c-num">20</span>) -&gt; <span class="c-fn">bool</span>:
+    <span class="c-cmt">"""质控：过滤过短或模板化失败的描述，宁缺毋滥（噪声会传染到下游所有步骤）"""</span>
+    <span class="c-kw">return</span> <span class="c-fn">bool</span>(caption) <span class="c-kw">and</span> <span class="c-fn">len</span>(caption) &gt;= min_len</code></pre>
+
+<div class="box box-orange">
+<b>工程要点</b>
+① 贪心解码保证可复现；② 质控前置——这一步放水的噪声会在"抽取→定位→训练"三级放大；③ 小批量验证先行：<code>python -m fg_data.dense_caption --limit 100</code> 先跑 100 张看效果再全量。批量生产时可用 vLLM 离线批推理把吞吐提升一个数量级（continuous batching + PagedAttention）。
+</div>
+
+<!-- ==================== S4 ==================== -->
+<h2 id="s4">4. Step 2：引用表达式抽取（Referring Expressions）</h2>
+
+<p><b>什么是引用表达式？</b>描述中<b>指代图中特定物体/区域</b>的短语。关键约束：必须带细粒度修饰（颜色/材质/动作/数量），光秃秃的"猫""狗"不算——因为它无法和图中具体区域建立唯一对应。</p>
+
+<div class="box box-green">
+<b>例子</b>
+"一个穿着蓝色T恤的男人在一片绿色的草地上玩一个红色的球"<br>
+→ <code>["穿着蓝色T恤的男人", "一片绿色的草地", "一个红色的球"]</code>
+</div>
+
+<div class="file-tag">fg_data/expressions.py —— SpaCy 抽取 + 正则兜底</div>
+<pre><code><span class="c-cmt"># 代词/无信息量开头直接丢弃——"它"指代不明，grounding 必然产生噪声框</span>
+_PRONOUN_HEAD = (<span class="c-str">"它"</span>, <span class="c-str">"这个"</span>, <span class="c-str">"那个"</span>, <span class="c-str">"这些"</span>, <span class="c-str">"那些"</span>, <span class="c-str">"其"</span>, <span class="c-str">"该"</span>)
+
+<span class="c-kw">def</span> <span class="c-fn">extract_with_spacy</span>(caption: <span class="c-fn">str</span>, nlp) -&gt; <span class="c-fn">list</span>[<span class="c-fn">str</span>]:
+    <span class="c-cmt">"""SpaCy 路径：名词短语块（noun_chunks）+ 修饰语过滤"""</span>
+    doc = nlp(caption)
+    expressions = []
+    <span class="c-kw">for</span> chunk <span class="c-kw">in</span> doc.noun_chunks:
+        <span class="c-cmt"># 规则1：长度≥2，单字名词没有细粒度信息</span>
+        <span class="c-kw">if</span> <span class="c-fn">len</span>(chunk) &lt; <span class="c-num">2</span>:
+            <span class="c-kw">continue</span>
+        <span class="c-cmt"># 规则2：块内必须含形容词/动词/数词——这是"细粒度"的判定标准</span>
+        <span class="c-cmt"># "男人"不含 ADJ/VERB/NUM 会被丢弃；"穿蓝色T恤的男人"含 VERB 保留</span>
+        <span class="c-kw">if</span> <span class="c-kw">not</span> <span class="c-fn">any</span>(t.pos_ <span class="c-kw">in</span> (<span class="c-str">"ADJ"</span>, <span class="c-str">"VERB"</span>, <span class="c-str">"NUM"</span>) <span class="c-kw">for</span> t <span class="c-kw">in</span> chunk):
+            <span class="c-kw">continue</span>
+        text = chunk.text.strip()
+        <span class="c-kw">if</span> <span class="c-fn">len</span>(text) &lt; <span class="c-num">2</span> <span class="c-kw">or</span> text.startswith(_PRONOUN_HEAD):
+            <span class="c-kw">continue</span>
+        expressions.append(text)
+    <span class="c-kw">return</span> expressions
+
+<span class="c-cmt"># 兜底：SpaCy 中文模型未安装时用正则抓「数量词/属性词 + 名词」片段</span>
+<span class="c-cmt"># 精度较低但保证流水线不断——重要的工程习惯：每个外部依赖都要有降级路径</span>
+_ATTR_PATTERN = re.compile(
+    <span class="c-str">r"[一二两三四五六七八九十百千万\d]+[个只张片条双件匹头颗株]?"</span>
+    <span class="c-str">r"[^，。；,.;]{1,12}?"</span>
+    <span class="c-str">r"(?:色|红|黄|蓝|绿|白|黑|灰|紫|粉|棕|橙|金|银|大|小|新|旧|长|短|高|矮)"</span>
+    <span class="c-str">r"[^，。；,.;]{0,10}"</span>
+)</code></pre>
+
+<div class="box box-blue">
+<b>数量约束</b>
+去重后每图保留 3~8 个表达式（默认 1~6）：太少说明 caption 质量差（丢图），太多则训练时区域前向开销爆炸。
+</div>
+
+<!-- ==================== S5 ==================== -->
+<h2 id="s5">5. Step 3：Grounding 边界框定位</h2>
+
+<p>这一步把文本短语"钉"到图像像素上：用 <b>YOLO-World</b>（开放词汇检测器，支持任意文本词表）为每个表达式找框。三条质控规则都来自一个原则：<b>宁可丢数据，不要噪声监督</b>。</p>
+
+<ul>
+  <li><b>NMS 去重</b>（iou=0.5，模型内置）：同一物体的重复框合并；</li>
+  <li><b>置信度 &gt; 0.4</b>：低置信度框大概率是错配，监督信号有害；</li>
+  <li><b>无框则丢弃表达式</b>：不退化成"全图框"——全图框等于把区域损失退化成全局损失，还不如没有。</li>
+</ul>
+
+<div class="file-tag">fg_data/grounding.py —— 每个表达式保留最高分框</div>
+<pre><code><span class="c-kw">def</span> <span class="c-fn">ground_one_image</span>(model, image_path: <span class="c-fn">str</span>, expressions: <span class="c-fn">list</span>[<span class="c-fn">str</span>],
+                     conf_thres: <span class="c-fn">float</span>, nms_iou: <span class="c-fn">float</span>) -&gt; <span class="c-fn">list</span>[<span class="c-fn">dict</span>]:
+    <span class="c-cmt">"""对一张图的所有表达式做开放词汇检测，返回 [{expr, bbox, conf}]"""</span>
+    <span class="c-cmt"># set_classes：把开放词表设为本图的表达式列表——</span>
+    <span class="c-cmt"># YOLO-World 会把每个表达式编码成文本嵌入，检测头对每个词表项独立打分</span>
+    model.set_classes(expressions)
+    <span class="c-cmt"># conf=置信度阈值，iou=NMS 阈值（内置 NMS 在此生效）</span>
+    results = model.predict(image_path, conf=conf_thres, iou=nms_iou, verbose=<span class="c-kw">False</span>)[<span class="c-num">0</span>]
+
+    W, H = results.orig_shape[<span class="c-num">1</span>], results.orig_shape[<span class="c-num">0</span>]
+    best: <span class="c-fn">dict</span>[<span class="c-fn">int</span>, <span class="c-fn">dict</span>] = {}   <span class="c-cmt"># cls_idx（词表下标）-> 最高分框</span>
+    <span class="c-kw">for</span> box <span class="c-kw">in</span> results.boxes:
+        cls_idx = <span class="c-fn">int</span>(box.cls.item())    <span class="c-cmt"># 该框属于词表中第几个表达式</span>
+        conf = <span class="c-fn">float</span>(box.conf.item())
+        <span class="c-cmt"># 同一表达式可能检出多个框，只留置信度最高的一个（每物体一个最准的框）</span>
+        <span class="c-kw">if</span> cls_idx <span class="c-kw">not</span> <span class="c-kw">in</span> best <span class="c-kw">or</span> conf &gt; best[cls_idx][<span class="c-str">"conf"</span>]:
+            x1, y1, x2, y2 = box.xyxy[<span class="c-num">0</span>].tolist()
+            best[cls_idx] = {
+                <span class="c-str">"expr"</span>: expressions[cls_idx],
+                <span class="c-str">"bbox"</span>: [x1 / W, y1 / H, x2 / W, y2 / H],  <span class="c-cmt"># 归一化到 [0,1]，与分辨率解耦</span>
+                <span class="c-str">"conf"</span>: <span class="c-fn">round</span>(conf, <span class="c-num">4</span>),
+            }
+    <span class="c-kw">return</span> <span class="c-fn">list</span>(best.values())   <span class="c-cmt"># 无框检出的表达式自然消失（被丢弃）</span></code></pre>
+
+<div class="box box-orange">
+<b>为什么存归一化坐标？</b>
+训练时图像会被缩放到不同分辨率（尤其 Qwen2.5-VL 的原生动态分辨率），归一化坐标与输入尺寸解耦，池化时再按实际 patch 网格换算（见第 7 节）。
+</div>
+
+<!-- ==================== S6 ==================== -->
+<h2 id="s6">6. Step 4：难负例构造（Hard Negatives）—— 全流程的灵魂</h2>
+
+<p>这是整个方案最关键的一步。<b>核心思想：保留核心对象，只改一个细粒度属性</b>，让负样本与正样本"几乎一样但又确实不同"。在论文式 4 的框架下，每个区域的候选描述 = <b>1 条正例 + M−1 条难负例</b>，它们将在同一个 softmax 里竞争（见第 8 节）。</p>
+
+<div class="box box-purple">
+<b>改写示例（框不变！）</b>
+"一只正在跳跃的白色猫" → "一只正在跳跃的<b style="color:var(--red)">黑色</b>猫"（改颜色）<br>
+难负例指向<b>同一个 bbox</b>——模型没法靠"找错物体"蒙混，必须学会区分属性。
+</div>
+
+<p>构造方式采用 <b>LLM 改写 + 质量校验</b>（规则词表作为兜底）：大模型不受固定词表限制，能覆盖开放属性（大小、状态、材质、空间关系……），但 LLM 会跑偏——重写整句、产出不"难"的负例——所以必须配校验器。三道闸门：<b>结构校验</b>（非空/去重/不等于正例）、<b>长度比例约束</b>、<b>编辑相似度 ≥ 0.5</b>（SequenceMatcher，保证"只改一处"）。LLM 产出不足时用规则词表补齐，流水线永不断。</p>
+
+<div class="file-tag">fg_data/hard_negatives.py —— LLM 改写 prompt 与三道校验</div>
+<pre><code>LLM_PROMPT = (
+    <span class="c-str">"你是视觉-语言对比学习的数据构造专家。给定一个描述图像区域的中文短语，"</span>
+    <span class="c-str">"请构造 {k} 个“难负例”（hard negatives），用于训练模型区分细粒度属性。\n"</span>
+    <span class="c-str">"要求：\n"</span>
+    <span class="c-str">"1. 每个难负例只改动原短语中的一个细粒度属性（颜色/动作/数量/材质/状态/大小等），"</span>
+    <span class="c-str">"其余文字保持完全不变；\n"</span>          <span class="c-cmt"># "只改一处"是"难"的前提：改多处模型很容易判负</span>
+    <span class="c-str">"2. 改动后的语义必须与原短语确实冲突（互斥），不能是近义或无关替换；\n"</span>
+    <span class="c-str">"3. 语句通顺，符合中文表达习惯；\n"</span>
+    <span class="c-str">"4. 难负例之间互不相同；\n"</span>
+    <span class="c-str">"5. 每行输出一个难负例短语，不要编号、不要引号、不要任何解释。\n"</span>
+    <span class="c-str">"原短语：{expr}"</span>
+)
+
+<span class="c-kw">def</span> <span class="c-fn">_valid_negative</span>(expr: <span class="c-fn">str</span>, neg: <span class="c-fn">str</span>, used: <span class="c-fn">set</span>[<span class="c-fn">str</span>],
+                    min_ratio: <span class="c-fn">float</span> = <span class="c-num">0.5</span>) -&gt; <span class="c-fn">bool</span>:
+    <span class="c-cmt">"""单条难负例质量校验（拦截 LLM 跑偏的三道闸门）：
+    1. 非空且不等于正例、未使用过；
+    2. 长度比例约束：改写只动一个属性，长度不应剧烈变化；
+    3. 编辑相似度 &gt;= min_ratio：SequenceMatcher 衡量整体重合度——
+       "只改一处"的难负例 ratio 通常 &gt; 0.7；LLM 重写整句时 ratio 显著降低，
+       以此拦截"不难"或跑偏的输出。
+    """</span>
+    <span class="c-kw">if</span> <span class="c-kw">not</span> neg <span class="c-kw">or</span> neg <span class="c-kw">in</span> used:
+        <span class="c-kw">return</span> <span class="c-kw">False</span>
+    <span class="c-kw">if</span> <span class="c-kw">not</span> (<span class="c-num">0.4</span> * <span class="c-fn">len</span>(expr) &lt;= <span class="c-fn">len</span>(neg) &lt;= <span class="c-num">2.5</span> * <span class="c-fn">len</span>(expr)):
+        <span class="c-kw">return</span> <span class="c-kw">False</span>
+    <span class="c-kw">return</span> difflib.SequenceMatcher(<span class="c-kw">None</span>, expr, neg).ratio() &gt;= min_ratio
+
+<span class="c-kw">def</span> <span class="c-fn">make_hard_negatives</span>(expr, k, rng, llm_maker=<span class="c-kw">None</span>):
+    <span class="c-cmt">"""统一入口：优先 LLM 构造（逐条校验），不足 k 条时用规则词表补齐"""</span>
+    negatives, used = [], {expr}
+    <span class="c-kw">if</span> llm_maker <span class="c-kw">is</span> <span class="c-kw">not</span> <span class="c-kw">None</span>:
+        <span class="c-kw">try</span>:
+            <span class="c-kw">for</span> neg <span class="c-kw">in</span> llm_maker.generate(expr, k):
+                <span class="c-kw">if</span> <span class="c-fn">len</span>(negatives) &gt;= k:
+                    <span class="c-kw">break</span>
+                <span class="c-kw">if</span> _valid_negative(expr, neg, used):   <span class="c-cmt"># 逐条过闸门</span>
+                    used.add(neg)
+                    negatives.append(neg)
+        <span class="c-kw">except</span> Exception:
+            <span class="c-cmt"># 单条失败不中断：本条回退规则词表（流水线可靠性优先）</span>
+            <span class="c-kw">pass</span>
+    <span class="c-kw">if</span> <span class="c-fn">len</span>(negatives) &lt; k:   <span class="c-cmt"># LLM 不可用或产出不足 -&gt; 规则补齐</span>
+        <span class="c-kw">for</span> neg <span class="c-kw">in</span> make_hard_negatives_rule(expr, k - <span class="c-fn">len</span>(negatives), rng):
+            <span class="c-kw">if</span> neg <span class="c-kw">not</span> <span class="c-kw">in</span> used:
+                used.add(neg)
+                negatives.append(neg)
+    <span class="c-kw">return</span> negatives
+    <span class="c-cmt"># 注意：改不出难负例的区域会被丢弃——没有对比就没有可学信号</span></code></pre>
+
+<div class="box box-green">
+<b>实测效果（本工作区 fg_clip，Qwen2.5-VL-3B text-only 生成）</b>
+LLM 后端复用 dense caption 的模型权重（零额外模型成本），<code>do_sample=True, temperature=0.7</code> 提供改写多样性；编辑相似度校验实测可拦截整句重写（"一朵粉色的花"→"今天天气很好我们去公园散步" ratio≈0.13 被拦）和过短碎片（"红色" 被长度约束拦）。
+</div>
+
+<div class="box box-blue">
+<b>面试加分点：为什么批内随机负例不够？</b>
+批内负例是"别的图的别的句子"，和正例差异巨大（不同物体、不同场景），模型用粗粒度特征就能轻松分开，梯度趋近于零。难负例只改一个属性，迫使模型把容量分配到细粒度判别上——这就是"hard negative mining"在对比学习里的标准作用。FG-CLIP 论文消融证明：难负例损失是细粒度提升的最大单项贡献（FG-OVD hard 子集 24.5% → 46.1%）。用 LLM 而非规则词表改写，是为了覆盖开放属性空间；但必须配校验器，否则 LLM 的自由度会变成噪声源。
+</div>
+
+<!-- ==================== S7 ==================== -->
+<h2 id="s7">7. 区域特征提取：bbox → patch 网格池化（含错位处理）</h2>
+
+<p>数据准备好了，怎么从 ViT 里取出"某个 bbox 的特征"？方案要点：<b>不裁图、不二次编码、不引入检测主干</b>——直接复用整图前向已经算好的 patch token，把 bbox"叠"到 patch 网格上做矩形均值池化。</p>
+
+<div class="flow">
+  <div class="step"><div class="t">归一化 bbox</div><div class="d">[0.31, 0.12, 0.55, 0.86]</div></div>
+  <div class="arrow">→</div>
+  <div class="step"><div class="t">映射到 patch 网格</div><div class="d">× (gh, gw) 取整<br>得到 patch 行列范围</div></div>
+  <div class="arrow">→</div>
+  <div class="step"><div class="t">覆盖 patch 均值池化</div><div class="d">feat_map[y1:y2, x1:x2].mean()</div></div>
+  <div class="arrow">→</div>
+  <div class="step" style="border-color:var(--green)"><div class="t">region_proj 投影</div><div class="d">对齐到共享嵌入空间</div></div>
+</div>
+
+<div class="file-tag">fg_clip/region.py —— 池化 + 区域编码</div>
+<pre><code><span class="c-kw">def</span> <span class="c-fn">_pool_bbox</span>(feat_map: torch.Tensor, bbox: <span class="c-fn">list</span>[<span class="c-fn">float</span>]) -&gt; torch.Tensor:
+    <span class="c-cmt">"""在 [gh, gw, D] 的 patch 特征图上按归一化 bbox 做矩形均值池化"""</span>
+    gh, gw = feat_map.shape[<span class="c-num">0</span>], feat_map.shape[<span class="c-num">1</span>]
+    <span class="c-cmt"># 归一化坐标 × 网格尺寸 → patch 下标，clamp 防越界</span>
+    x1 = <span class="c-fn">max</span>(<span class="c-num">0</span>, <span class="c-fn">min</span>(<span class="c-fn">int</span>(bbox[<span class="c-num">0</span>] * gw), gw - <span class="c-num">1</span>))
+    y1 = <span class="c-fn">max</span>(<span class="c-num">0</span>, <span class="c-fn">min</span>(<span class="c-fn">int</span>(bbox[<span class="c-num">1</span>] * gh), gh - <span class="c-num">1</span>))
+    <span class="c-cmt"># +1 保证小框至少覆盖 1 个 patch（否则小物体池化成空 tensor）</span>
+    x2 = <span class="c-fn">max</span>(x1 + <span class="c-num">1</span>, <span class="c-fn">min</span>(<span class="c-fn">int</span>(bbox[<span class="c-num">2</span>] * gw) + <span class="c-num">1</span>, gw))
+    y2 = <span class="c-fn">max</span>(y1 + <span class="c-num">1</span>, <span class="c-fn">min</span>(<span class="c-fn">int</span>(bbox[<span class="c-num">3</span>] * gh) + <span class="c-num">1</span>, gh))
+    <span class="c-kw">return</span> feat_map[y1:y2, x1:x2].mean(dim=(<span class="c-num">0</span>, <span class="c-num">1</span>))   <span class="c-cmt"># [D]，均值池化</span>
+
+<span class="c-kw">def</span> <span class="c-fn">encode_regions</span>(model, image_inputs, regions_per_image, region_proj):
+    <span class="c-cmt">"""对 batch 内每图的若干 bbox 提取区域特征，返回 [ΣR_i, embed_dim]"""</span>
+    <span class="c-kw">if</span> <span class="c-fn">isinstance</span>(image_inputs, (<span class="c-fn">list</span>, <span class="c-fn">tuple</span>)):   <span class="c-cmt"># qwenvit 路径（动态分辨率）</span>
+        pixel_values, grid_thw = image_inputs
+        tower = model.visual.visual
+        <span class="c-cmt"># 取 merger 之前的 patch token——merger 会 2×2 合并相邻 patch，空间分辨率降 4 倍</span>
+        tokens = tower(pixel_values, grid_thw=grid_thw)
+        <span class="c-cmt"># qwenvit 把所有图的 patch 拍平成一个长序列，按 grid_thw 切回各图</span>
+        patch_counts = (grid_thw[:, <span class="c-num">1</span>] * grid_thw[:, <span class="c-num">2</span>]).tolist()
+        per_image = torch.split(tokens, patch_counts, dim=<span class="c-num">0</span>)
+        feats = []
+        <span class="c-kw">for</span> tokens_i, (_, gh, gw), bboxes <span class="c-kw">in</span> <span class="c-fn">zip</span>(
+                per_image, grid_thw.tolist(), regions_per_image):
+            feat_map = tokens_i.view(gh, gw, -<span class="c-num">1</span>)   <span class="c-cmt"># 还原成 2D 网格 [gh, gw, D]</span>
+            feats.extend(_pool_bbox(feat_map, b) <span class="c-kw">for</span> b <span class="c-kw">in</span> bboxes)
+    <span class="c-kw">else</span>:                                   <span class="c-cmt"># timm 路径（固定 224，14×14 网格）</span>
+        feats_tokens = model.visual.vit.forward_features(image_inputs)  <span class="c-cmt"># [B,1+N,D]</span>
+        patch = feats_tokens[:, <span class="c-num">1</span>:, :]               <span class="c-cmt"># 去掉 CLS token</span>
+        gh = gw = <span class="c-fn">int</span>(patch.shape[<span class="c-num">1</span>] ** <span class="c-num">0.5</span>)
+        feats = []
+        <span class="c-kw">for</span> tokens_i, bboxes <span class="c-kw">in</span> <span class="c-fn">zip</span>(patch, regions_per_image):
+            feat_map = tokens_i.view(gh, gw, -<span class="c-num">1</span>)
+            feats.extend(_pool_bbox(feat_map, b) <span class="c-kw">for</span> b <span class="c-kw">in</span> bboxes)
+
+    stacked = torch.stack(feats, dim=<span class="c-num">0</span>)
+    <span class="c-cmt"># region_proj：merger 前 hidden 维（1280/768）→ 共享嵌入维（如 768）</span>
+    <span class="c-cmt"># 用独立投影层而非复用全局投影，因为 patch 均值特征的分布与 CLS 不同</span>
+    <span class="c-kw">return</span> region_proj(stacked.to(region_proj.weight.dtype))</code></pre>
+
+<div class="box box-red">
+<b>追问预案：YOLO 的框和 patch 网格几乎从不对齐，怎么办？</b>
+这是刻意的近似而非疏忽，成立的两条前提：<br>
+① <b>patch token 不是"那个格子的像素"</b>——经过多层自注意力，每个 token 编码的是"这块区域在全图上下文中意味着什么"，边界错位从像素层面的硬错位软化为表征层面的软噪声；<br>
+② <b>对比损失只要相对排序</b>——边界错位对所有候选区域是同一种系统性噪声，不偏向任何一边，系统性噪声在对比学习里天然抵消。<br>
+取整策略是<b>过度包含</b>（floor 左边界 / ceil 右边界，误差 ≤ 一圈 14px patch）：多圈一点背景被内部占多数的目标 token 稀释，比漏掉目标本体安全。
+</div>
+
+<div class="box box-orange">
+<b>精度不够时的三档升级路径</b>
+① <b>取整量化（现版）</b>：覆盖到的 patch 全计入，最简单；
+② <b>覆盖面积加权</b>：w = patch 与 bbox 的交集面积 / patch 面积，r = Σ(wᵢ·tᵢ)/Σwᵢ——边界 patch 从"全票"变"按比例投票"，一行思路零依赖；
+③ <b>RoIAlign（FG-CLIP 论文版）</b>：分数坐标双线性插值采样，完全消除量化误差——像素级任务（分割/小目标）才值得上，对属性级对齐，①与③的差距在检测框本身的抖动噪声量级以下。
+</div>
+
+<!-- ==================== S8 ==================== -->
+<h2 id="s8">8. 三个损失（FG-CLIP 论文版）：L_global + 0.1·L_regional + 0.5·L_hard</h2>
+
+<p>本节三项损失与 FG-CLIP 论文式 2~5 一一对应。<b>两阶段训练</b>：Stage 1 只训全局（基座 v1 已完成）；Stage 2 三项联合，<b>学习率比 Stage 1 低 1~2 个数量级</b>（论文 1e-4 → 1e-6），防止细粒度训练冲掉全局能力。</p>
+
+<h3>8.1 L_global：全局对比损失（守基本盘）</h3>
+<div class="formula">
+  L<sub>global</sub> = −(1/2N) Σ<sub>i</sub> [ log softmax 相似度（图→文）+ log softmax（文→图） ]
+  <span class="note">批内 N 对图文的对称对比损失（论文式 2，InfoNCE 形式）。作用一个字：<b>守</b>——区域监督是额外打补丁，没有它约束，细粒度训练会把全局检索能力带崩，所以周期 eval 盯的恰恰是全局 hit@5 而非区域指标。</span>
+</div>
+
+<h3>8.2 L_regional：区域-表达式对称 InfoNCE（论文式 3）</h3>
+<div class="formula">
+  L<sub>regional</sub> = −(1/2K) Σ<sub>i=1..K</sub> [ log e<sup>s(rᵢ,lᵢ)/τ</sup>/Σ<sub>j</sub> e<sup>s(rᵢ,lⱼ)/τ</sup> + log e<sup>s(lᵢ,rᵢ)/τ</sup> / Σ<sub>j</sub> e<sup>s(lᵢ,rⱼ)/τ</sup> ]
+  <span class="note">K = batch 内全部有效框（每图 ≤4）。r 是区域特征（第 7 节的网格池化 + region_proj），l 是对应表达式特征，τ 与全局损失共享。它教的不再是"整图像这段文字"，而是"<b>这个框里的东西就是这个词</b>"——区域定位能力。</span>
+</div>
+
+<h3>8.3 L_hard：难负例 M 路单向 softmax 分类（论文式 4，本次升级的核心）</h3>
+<div class="formula">
+  L<sub>hard</sub> = −(1/K) Σ<sub>i=1..K</sub> log [ e<sup>s(rᵢ, lᵢ,₁)/τ</sup> / Σ<sub>j=1..M</sub> e<sup>s(rᵢ, lᵢ,ⱼ)/τ</sup> ]
+  <span class="note">每个区域的 M 条候选描述（j=1 为正例，j&gt;1 为 M−1 条属性改写难负例）放进<b>同一个 softmax</b> 竞争，模型必须把概率质量压到正例上。单向（区域→文本）即可，因为难负例只在文本侧构造。</span>
+</div>
+
+<table>
+  <tr><th style="width:26%">对比维度</th><th>旧版：margin hinge（max(0, m+s_hard−s_pos)）</th><th>论文版：M 路 softmax 分类（当前实现）</th></tr>
+  <tr><td>梯度特性</td><td>分对即零梯度（hinge 截断），样本"毕业"后不再学习</td><td>正例与所有难负例<b>持续竞争</b>，每条难负例恒有梯度</td></tr>
+  <tr><td>分数校准</td><td>只约束相对间隔，跨样本分数不可比（"比烂"空间）</td><td>同一 τ 下的 softmax 归一，分数跨样本可比、可设阈值</td></tr>
+  <tr><td>多负例利用</td><td>每条难负例独立与正例比，互不知情</td><td>M−1 条难负例在同一分母里互相压制，梯度信号更强</td></tr>
+  <tr><td>论文消融证据</td><td>—</td><td>FG-OVD hard 子集 24.5% → 46.1%（+88%），三项中贡献最大</td></tr>
+</table>
+
+<h3>8.4 损失代码（当前实现）</h3>
+<div class="file-tag">fg_clip/region.py —— 区域 InfoNCE + 论文式（4）M 路分类</div>
+<pre><code><span class="c-kw">def</span> <span class="c-fn">region_infonce_loss</span>(region_z, expr_z, logit_scale):
+    <span class="c-cmt">"""区域-表达式批内对称 InfoNCE（输入需已 L2 归一化）"""</span>
+    logits = logit_scale.exp() * region_z @ expr_z.t()   <span class="c-cmt"># [K, K] 相似度矩阵</span>
+    labels = torch.arange(logits.shape[<span class="c-num">0</span>], device=logits.device)  <span class="c-cmt"># 对角线为正例</span>
+    <span class="c-cmt"># 对称：区域→表达式 + 表达式→区域，两个方向各算一次交叉熵</span>
+    <span class="c-kw">return</span> <span class="c-num">0.5</span> * (F.cross_entropy(logits, labels)
+                 + F.cross_entropy(logits.t(), labels))
+
+<span class="c-kw">def</span> <span class="c-fn">fgclip_hard_loss</span>(region_z, cand_z, cand_counts, logit_scale):
+    <span class="c-cmt">"""难负例 M 路 softmax 分类损失（FG-CLIP 论文式 4，单向）：
+        L = -(1/K) Σ_i log [ exp(s(r_i, l_i,1)/τ) / Σ_j exp(s(r_i, l_i,j)/τ) ]
+
+    每个区域的 M_i 条候选描述（第 0 条正例 + M_i-1 条属性改写难负例）放进
+    同一个 softmax 竞争。相对 margin hinge 的优势：
+      - 正例与所有难负例持续竞争，每条难负例都贡献梯度（hinge 分对即零梯度）；
+      - 分数经同一 τ 标定，跨样本可比（缓解"比烂"/校准问题）。
+
+    参数：
+        region_z:    [K, D] 区域特征（已归一化）
+        cand_z:      [ΣM_i, D] 候选描述特征，按区域连续排布，每区第 0 条为正例
+        cand_counts: [K] 每个区域的候选数 M_i
+        logit_scale: 共享温度（与全局/区域 InfoNCE 同一个 logit_scale）
+    """</span>
+    tau = logit_scale.exp()
+    losses, offset = [], <span class="c-num">0</span>
+    <span class="c-kw">for</span> i, m <span class="c-kw">in</span> <span class="c-fn">enumerate</span>(cand_counts.tolist()):
+        logits = tau * (cand_z[offset:offset + m] @ region_z[i])      <span class="c-cmt"># [M_i]</span>
+        target = torch.zeros(<span class="c-num">1</span>, dtype=torch.long, device=logits.device)
+        losses.append(F.cross_entropy(logits.unsqueeze(<span class="c-num">0</span>), target))
+        offset += m
+    <span class="c-kw">return</span> torch.stack(losses).mean()</code></pre>
+
+<div class="box box-green">
+<b>数值自测（已通过）</b>
+随机特征下 K=3、M=[3,2,1]：L_hard = 0.44 ≈ ln(M) 的期望量级（0.60，τ 锐化后略低属正常）；正例与区域特征完全对齐时 L_hard = 0.0001（趋零）；区域特征 / 候选文本 / τ 三路梯度全部流通。
+</div>
+
+<div class="box box-blue">
+<b>温度共享的设计</b>
+三项损失共用同一个可学习 logit_scale：全局、区域、难负例的相似度用同一把"尺子"度量，避免各损失项在数值尺度上打架——这也是 α、β 能直接沿用论文值（0.1 / 0.5）的前提。
+</div>
+
+<!-- ==================== S9 ==================== -->
+<h2 id="s9">9. 完整训练循环（带注释）</h2>
+
+<p>FG 阶段为<b>单卡设计</b>：区域/难负例监督都在 batch 内的区域对上进行，不依赖全局负例，无需多卡负例同步。</p>
+
+<div class="file-tag">train_fg.py —— FGCollator：每区候选描述连续排布</div>
+<pre><code><span class="c-kw">def</span> <span class="c-fn">__call__</span>(self, batch):
+    global_batch = self.clip_collator(
+        [{<span class="c-str">"image"</span>: self._load(b), <span class="c-str">"text"</span>: b[<span class="c-str">"text"</span>]} <span class="c-kw">for</span> b <span class="c-kw">in</span> batch])
+
+    <span class="c-cmt"># ---- 区域监督：每区候选 = [正例 expr, 难负例1, 难负例2, ...] 连续排布 ----</span>
+    <span class="c-cmt"># FG-CLIP 式（4）要求每区第 0 条为正例；pos 即各区候选首条，无需单独编码</span>
+    regions_per_image, cand_texts, cand_counts = [], [], []
+    <span class="c-kw">for</span> b <span class="c-kw">in</span> batch:
+        bboxes = []
+        <span class="c-kw">for</span> r <span class="c-kw">in</span> b[<span class="c-str">"regions"</span>]:
+            bboxes.append(r[<span class="c-str">"bbox"</span>])
+            cand_texts.append(r[<span class="c-str">"expr"</span>])          <span class="c-cmt"># 第 0 条 = 正例</span>
+            cand_texts.extend(r[<span class="c-str">"hard"</span>])          <span class="c-cmt"># 后接 M-1 条改写难负例</span>
+            cand_counts.append(<span class="c-num">1</span> + <span class="c-fn">len</span>(r[<span class="c-str">"hard"</span>]))
+        regions_per_image.append(bboxes)
+
+    cand_enc = self._tokenize_list(cand_texts) <span class="c-kw">if</span> cand_texts <span class="c-kw">else</span> <span class="c-kw">None</span>
+    <span class="c-kw">return</span> {
+        **global_batch,
+        <span class="c-str">"regions_per_image"</span>: regions_per_image,
+        <span class="c-str">"cand_ids"</span>: cand_enc[<span class="c-str">"input_ids"</span>] <span class="c-kw">if</span> cand_enc <span class="c-kw">else</span> <span class="c-kw">None</span>,
+        <span class="c-str">"cand_mask"</span>: cand_enc[<span class="c-str">"attention_mask"</span>] <span class="c-kw">if</span> cand_enc <span class="c-kw">else</span> <span class="c-kw">None</span>,
+        <span class="c-str">"cand_counts"</span>: torch.tensor(cand_counts, dtype=torch.long),
+    }</code></pre>
+
+<div class="file-tag">train_fg.py —— 训练主循环节选</div>
+<pre><code><span class="c-kw">while</span> step &lt; tc[<span class="c-str">"max_steps"</span>]:
+    <span class="c-kw">for</span> batch <span class="c-kw">in</span> train_loader:
+        regions_per_image = batch.pop(<span class="c-str">"regions_per_image"</span>)  <span class="c-cmt"># [B][R_i][4] 归一化 bbox</span>
+        cand_ids  = batch.pop(<span class="c-str">"cand_ids"</span>).to(device)
+        cand_mask = batch.pop(<span class="c-str">"cand_mask"</span>).to(device)
+        cand_counts = batch.pop(<span class="c-str">"cand_counts"</span>).to(device)
+        batch = move_batch_to_device(batch, device)
+
+        <span class="c-kw">with</span> torch.autocast(device_type=<span class="c-str">"cuda"</span>, dtype=torch.bfloat16, enabled=use_bf16):
+            <span class="c-cmt"># ---- ① 全局损失：整图-整句，保住原有 CLIP 能力 ----</span>
+            img_z, txt_z, scale = model(batch)
+            l_global = clip_loss_fn(img_z, txt_z, scale)
+
+            <span class="c-cmt"># ---- ② 区域损失：共享视觉塔但多一次前向（取 merger 前 token）----</span>
+            region_z = F.normalize(
+                encode_regions(model, batch[<span class="c-str">"image_inputs"</span>],
+                               regions_per_image, region_proj), dim=-<span class="c-num">1</span>)
+
+            <span class="c-cmt"># 候选描述一次文本塔前向；各区首条即正例（cumsum 切片），省一次编码</span>
+            cand_z = model.encode_text(cand_ids, cand_mask)
+            starts = torch.cumsum(cand_counts, dim=<span class="c-num">0</span>) - cand_counts
+            pos_z = cand_z[starts]
+            l_region = region_infonce_loss(region_z, pos_z,
+                                           model.clamped_logit_scale())
+
+            <span class="c-cmt"># ---- ③ 难负例 M 路分类损失（FG-CLIP 式 4，单向 softmax）----</span>
+            l_hard = fgclip_hard_loss(region_z, cand_z, cand_counts,
+                                      model.clamped_logit_scale())
+
+            <span class="c-cmt"># ---- 总损失（论文式 5）：α=0.1, β=0.5 ----</span>
+            loss = (l_global + tc[<span class="c-str">"lambda_region"</span>] * l_region
+                    + tc[<span class="c-str">"lambda_hard"</span>] * l_hard) / tc[<span class="c-str">"accum_steps"</span>]
+
+        loss.backward()
+        <span class="c-kw">if</span> accum % tc[<span class="c-str">"accum_steps"</span>] == <span class="c-num">0</span>:
+            <span class="c-cmt"># region_proj 的参数也要参与梯度裁剪</span>
+            torch.nn.utils.clip_grad_norm_(
+                <span class="c-fn">list</span>(model.parameters()) + <span class="c-fn">list</span>(region_proj.parameters()),
+                tc[<span class="c-str">"grad_clip"</span>])
+            optimizer.step(); scheduler.step()
+            optimizer.zero_grad(set_to_none=<span class="c-kw">True</span>)
+
+            <span class="c-cmt"># 周期评估：重点监控全局 hit@5 是否回退——</span>
+            <span class="c-cmt"># 细粒度监督不能损害原有粗粒度检索能力，这是验收红线</span>
+            <span class="c-kw">if</span> evaluator <span class="c-kw">and</span> step % tc[<span class="c-str">"eval_every"</span>] == <span class="c-num">0</span>:
+                metrics = evaluator.run()</code></pre>
+
+<h3>训练配置要点（Stage 2 口径）</h3>
+<table>
+  <tr><th>配置项</th><th>值</th><th>说明</th></tr>
+  <tr><td>学习率</td><td>lr_vision=lr_text=1e-6，lr_proj=5e-6</td><td>比基座（1e-5）低约一个量级——FG-CLIP Stage2 防遗忘原则（论文降 100 倍，折中起步）</td></tr>
+  <tr><td>损失权重</td><td>λ_region=0.1，λ_hard=0.5</td><td>论文式 5 消融口径；区域标签有检测噪声故低权重，难负例是主增量故半权重</td></tr>
+  <tr><td>region_proj 优化组</td><td>lr = lr_proj, wd = 0</td><td>新增 Linear(1280→768, bias=False) 并入 proj 组</td></tr>
+  <tr><td>max_regions_per_image</td><td>4</td><td>控制区域前向的文本塔开销（每区 M 条候选文本共享一次前向）</td></tr>
+  <tr><td>分布式</td><td>单卡</td><td>区域/难负例监督在 batch 内区域对上进行，不依赖全局负例，无需多卡负例同步</td></tr>
+</table>
+
+<!-- ==================== S10 ==================== -->
+<h2 id="s10">10. 评估、消融与面试话术</h2>
+
+<h3>10.1 论文消融证据（arXiv 2505.05071，各损失项的贡献）</h3>
+<table>
+  <tr><th>配置</th><th>FG-OVD hard 子集</th><th>BBox 分类 Top-1</th><th>结论</th></tr>
+  <tr><td>CLIP 基线</td><td>12.0%</td><td>44.2</td><td>细粒度判别几乎为零</td></tr>
+  <tr><td>Stage1（长 caption 全局）</td><td>21.8%</td><td>47.2</td><td>dense caption 本身就有大幅增益</td></tr>
+  <tr><td>+ L_global</td><td>25.4%</td><td>46.8</td><td>全局项打底</td></tr>
+  <tr><td>+ L_regional</td><td>24.5%</td><td><b>53.7</b></td><td>区域项主贡献在框级分类（+14.7%）</td></tr>
+  <tr><td>+ L_hard（全量）</td><td><b>46.1%</b></td><td>52.3</td><td><b>难负例项是细粒度提升的最大单项（+88%）</b></td></tr>
+</table>
+
+<h3>10.2 本项目评估维度</h3>
+<table>
+  <tr><th>评估项</th><th>指标</th><th>预期</th></tr>
+  <tr><td>细粒度能力（主要目标）</td><td>区域-表达式检索 hit@k；属性判别准确率（正例 vs 难负例 M 路分类）</td><td>显著提升</td></tr>
+  <tr><td>全局能力回退检查（红线）</td><td>图↔文检索 hit@5</td><td><b>不低于</b> FG 训练前</td></tr>
+  <tr><td>消融 1：去掉 L_hard</td><td>属性判别准确率</td><td>应明显下降 → 证明难负例有效</td></tr>
+  <tr><td>消融 2：去掉 L_regional</td><td>区域检索 hit@k</td><td>应明显下降 → 证明区域监督有效</td></tr>
+</table>
+
+<h3>10.3 已知简化（诚实边界，面试主动说）</h3>
+<ul>
+  <li>区域池化用取整量化（patch 粒度 14px），论文用 RoIAlign——属性级对齐足够，像素级任务需升级（可先上覆盖面积加权）；</li>
+  <li>区域特征与全局前向分开执行（多一次视觉前向），工业版可共用一次前向取多层特征；</li>
+  <li>难负例校验是编辑相似度 + 长度约束（字符串级），工业版可再加独立 judge 模型做语义级校验；</li>
+  <li>YOLO-World 对中文表达式 grounding 能力有限，可将表达式翻译成英文再检测；</li>
+  <li>数据规模远小于论文（12M 图 / 40M 框），结论外推需谨慎。</li>
+</ul>
+
+<h3>10.4 面试话术（30 秒版 + 追问应对）</h3>
+<div class="box box-green">
+<b>30 秒版</b>
+"标准 CLIP 只做整图对整句的全局对齐，细粒度判别信号在数据里就不存在。FG-CLIP 的思路是显式制造监督：多模态大模型生成 dense caption，SpaCy 抽带属性修饰的引用表达式，YOLO-World 定位边界框，LLM 改写难负例（只改一个属性 + 编辑相似度校验）；训练分两阶段——先全局对齐塑形，再以低一个数量级的学习率叠加三项损失：全局 InfoNCE 守基本盘、区域对称 InfoNCE 教定位、难负例 M 路 softmax 分类教属性判别，权重 α=0.1/β=0.5 来自论文消融。区域特征直接在 ViT merger 前的 patch token 网格上做 bbox 池化，零额外检测参数；难负例分类让正例与所有改写负例在同一 softmax 持续竞争，分数可跨样本校准。"
+</div>
+<table>
+  <tr><th style="width:32%">可能追问</th><th>回答要点</th></tr>
+  <tr><td>为什么 L_hard 用 M 路分类而不是 margin？</td><td>hinge 分对即零梯度，M 路 softmax 让正例与所有改写负例持续竞争、每条负例恒有梯度；且同一 τ 下分数跨样本可比可设阈值，缓解 margin 的"比烂"问题。论文消融显示 hard 项是细粒度提升最大单项（24.5%→46.1%）。</td></tr>
+  <tr><td>bbox 和 patch 网格对不齐怎么办？</td><td>取整量化是刻意的过度包含近似：自注意力让 token 表征带全局上下文，错位是软噪声；对比损失只要相对排序，系统性噪声同向抵消。升级路径：覆盖面积加权 → RoIAlign。</td></tr>
+  <tr><td>为什么 Stage2 要降学习率？</td><td>细粒度监督会扰动已学好的全局空间，论文 Stage2 比 Stage1 低 100 倍（1e-4→1e-6）防遗忘；我们折中低 10 倍起步，配合周期 eval 盯全局 hit@5 回退。</td></tr>
+  <tr><td>为什么不直接训练检测器？</td><td>目标是对齐不是检测；patch 池化复用 CLIP 视觉塔，无额外参数、无检测标注成本，且特征天然在同一嵌入空间。</td></tr>
+  <tr><td>grounding 错了怎么办？</td><td>三道闸门：conf&gt;0.4 阈值、无框丢表达式、无区域丢整图。宁可数据少不要监督错——错框的负梯度比没梯度更糟。</td></tr>
+  <tr><td>和 GLIP / RegionCLIP 的区别？</td><td>GLIP 是检测框架做短语定位（检测范式）；RegionCLIP 用 RPN 提案蒸馏 CLIP（两阶段）；FG-CLIP 是在对比学习框架内加区域监督，不改模型结构。</td></tr>
+  <tr><td>LLM 构造难负例怎么保证质量？</td><td>prompt 约束"只改一个属性且互斥"只是软约束，必须配硬校验：结构（非空/去重）+ 长度比例 + 编辑相似度（SequenceMatcher≥0.5 拦截整句重写）；产出不足用规则词表补齐。工业版可再加 judge 模型做语义级校验。</td></tr>
+</table>
+
+<div class="foot">
+  本文档对应工作区实现：<code>fg_clip/fg_data/</code>（数据生产线四步）、<code>fg_clip/fg_clip/region.py</code>（区域特征与论文版损失）、<code>fg_clip/train_fg.py</code>（训练入口，单卡设计）。
+  参考文献：FG-CLIP (arXiv 2505.05071, ICML 2025)、CLIP (Radford et al., 2021)、GLIP、RegionCLIP、YOLO-World。
+  <br>版本说明：2026-08-27 按 FG-CLIP 论文原版重写损失章节——L_hard 由 margin hinge 升级为式（4）M 路单向 softmax 分类，权重对齐论文式（5）α=0.1/β=0.5，训练改为 Stage2 低学习率 + 单卡设计。
+</div>
+
+</div>
+</body>
+</html>

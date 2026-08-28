@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BLM ViT · SigLIP 训练全流程详解</title>
+<style>
+  :root {
+    --bg: #fafaf8; --card: #ffffff; --ink: #1f1f1d; --ink2: #5f5e5a; --ink3: #888780;
+    --line: #e6e4de; --accent: #534AB7; --accent-bg: #EEEDFE; --teal: #0F6E56; --teal-bg: #E1F5EE;
+    --amber: #854F0B; --amber-bg: #FAEEDA; --red: #A32D2D; --red-bg: #FCEBEB;
+    --code-bg: #282c34; --mono: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--ink); font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; line-height: 1.75; }
+  .layout { display: flex; max-width: 1280px; margin: 0 auto; }
+  nav { position: sticky; top: 0; width: 240px; height: 100vh; padding: 32px 20px; border-right: 1px solid var(--line); flex-shrink: 0; overflow-y: auto; background: var(--bg); }
+  nav h3 { font-size: 13px; color: var(--ink3); font-weight: 500; margin-bottom: 12px; letter-spacing: .05em; }
+  nav a { display: block; padding: 6px 10px; color: var(--ink2); text-decoration: none; font-size: 13.5px; border-radius: 6px; margin-bottom: 2px; }
+  nav a:hover { background: var(--accent-bg); color: var(--accent); }
+  main { flex: 1; padding: 40px 56px 120px; min-width: 0; }
+  h1 { font-size: 26px; font-weight: 600; margin-bottom: 8px; }
+  .subtitle { color: var(--ink2); font-size: 15px; margin-bottom: 40px; }
+  h2 { font-size: 20px; font-weight: 600; margin: 56px 0 6px; padding-top: 20px; border-top: 2px solid var(--line); }
+  h2 .step-no { display: inline-block; background: var(--accent); color: #fff; font-size: 13px; padding: 2px 10px; border-radius: 12px; margin-right: 10px; vertical-align: 3px; }
+  h3 { font-size: 15.5px; font-weight: 600; margin: 24px 0 8px; }
+  p { font-size: 14.5px; margin: 10px 0; }
+  .note { background: var(--amber-bg); border-left: 3px solid var(--amber); padding: 12px 16px; border-radius: 0 8px 8px 0; font-size: 13.5px; margin: 14px 0; color: #633806; }
+  .key { background: var(--teal-bg); border-left: 3px solid var(--teal); padding: 12px 16px; border-radius: 0 8px 8px 0; font-size: 13.5px; margin: 14px 0; color: #085041; }
+  .warn { background: var(--red-bg); border-left: 3px solid var(--red); padding: 12px 16px; border-radius: 0 8px 8px 0; font-size: 13.5px; margin: 14px 0; color: #791F1F; }
+  pre { background: var(--code-bg); color: #e8eaf0; border-radius: 10px; padding: 18px 20px; overflow-x: auto; font-family: var(--mono); font-size: 12.8px; line-height: 1.7; margin: 14px 0; }
+  pre .c { color: #7d8590; } pre .k { color: #c678dd; } pre .s { color: #98c379; }
+  pre .n { color: #d19a66; } pre .f { color: #61afef; }
+  code { font-family: var(--mono); }
+  :not(pre) > code { background: var(--accent-bg); color: var(--accent); padding: 1px 6px; border-radius: 4px; font-size: 13px; }
+  .flow { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 18px 0; }
+  .shape { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; font-family: var(--mono); font-size: 12.5px; text-align: center; }
+  .shape .dim { color: var(--accent); font-weight: 600; }
+  .shape .lbl { display: block; font-size: 11.5px; color: var(--ink3); font-family: -apple-system, "PingFang SC", sans-serif; }
+  .arrow { color: var(--ink3); font-size: 15px; text-align: center; }
+  .arrow .lbl { display: block; font-size: 11px; color: var(--teal); }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 13.5px; }
+  th, td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; }
+  th { background: #f3f2ee; font-weight: 600; }
+  td code { font-size: 12px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 14px 0; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; }
+  .card h4 { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+  .card p, .card li { font-size: 13px; color: var(--ink2); }
+  ul, ol { padding-left: 22px; font-size: 14px; margin: 8px 0; }
+  li { margin: 4px 0; }
+  .formula { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px 20px; font-family: var(--mono); font-size: 14px; margin: 14px 0; color: var(--accent); text-align: center; }
+  @media (max-width: 900px) { nav { display: none; } main { padding: 24px; } }
+</style>
+</head>
+<body>
+<div class="layout">
+<nav>
+  <h3>流程导航</h3>
+  <a href="#overview">0. 总览</a>
+  <a href="#s1">1. 数据准备</a>
+  <a href="#s2">2. binpack 装箱</a>
+  <a href="#s3">3. packing 与模型</a>
+  <a href="#s4">4. SigLIP 损失</a>
+  <a href="#s5">5. 多卡负例同步</a>
+  <a href="#s6">6. 超参与训练循环</a>
+  <a href="#s7">7. 显存账</a>
+  <a href="#s8">8. 产物与监控</a>
+  <a href="#s9">9. AutoDL 部署</a>
+</nav>
+<main>
+
+<h1>BLM ViT · SigLIP 训练全流程详解</h1>
+<p class="subtitle">Qwen2.5-VL-7B 视觉塔 + BGE-M3 文本塔 + SigLIP 损失，双卡 4090 DDP 实战配置。代码均取自 <code>blm_siglip</code> 工程并配详细注释。</p>
+
+<!-- ============ 0 总览 ============ -->
+<h2 id="overview"><span class="step-no">0</span>全流程总览</h2>
+<div class="flow">
+  <div class="shape"><span class="dim">wukong100m</span><span class="lbl">1亿URL+caption</span></div>
+  <div class="arrow">→<span class="lbl">下载清洗去重</span></div>
+  <div class="shape"><span class="dim">10万图文对</span><span class="lbl">train 9.9万/eval 1千</span></div>
+  <div class="arrow">→<span class="lbl">binpack</span></div>
+  <div class="shape"><span class="dim">~6900 bins</span><span class="lbl">每桶≈14336 token</span></div>
+  <div class="arrow">→<span class="lbl">交错分bin</span></div>
+  <div class="shape"><span class="dim">2×4090</span><span class="lbl">各卡独立编码</span></div>
+  <div class="arrow">→<span class="lbl">gather</span></div>
+  <div class="shape"><span class="dim">全局负例×2</span><span class="lbl">SigLIP逐对sigmoid</span></div>
+  <div class="arrow">→<span class="lbl">DDP平均梯度</span></div>
+  <div class="shape"><span class="dim">BLM ViT v1</span><span class="lbl">ckpt + metrics.jsonl</span></div>
+</div>
+<div class="key"><b>一句话主线</b>：数据侧把图文对"洗干、去重、按 token 装箱"，模型侧双塔各自编码后通过 gather 共享负例，SigLIP 把 N×N 矩阵每格当独立二分类，DDP 平均梯度后 AdamW 分组更新。全流程两个设计哲学：<b>贵的计算切开分摊，便宜的结果互相传递</b>；<b>规则部分零参数与官方对齐，学习部分全交给预训练权重 + 判别式 LR</b>。</div>
+
+<!-- ============ 1 数据准备 ============ -->
+<h2 id="s1"><span class="step-no">1</span>数据准备：从 1 亿 URL 到 10 万图文对</h2>
+<h3>1.1 数据源与配比建议</h3>
+<table>
+  <tr><th>数据集</th><th>角色</th><th>配比</th><th>说明</th></tr>
+  <tr><td>Wukong100m（中文）</td><td>公共主力</td><td>60%</td><td>32 分片×315 万对，仅 URL+文本（16.7GB），图片实测下载成功率 ~60%</td></tr>
+  <tr><td>LAION-5B 中文子集</td><td>公共多样性</td><td>20%</td><td>metadata parquet + 按 URL 下载</td></tr>
+  <tr><td>业务封面 + 飞轮 caption</td><td>领域注入</td><td>20%</td><td>Qwen2.5-VL-72B 刷 caption；不足时<b>重复采样 2~3 epoch 等价混入</b>，不降公共占比</td></tr>
+</table>
+<h3>1.2 清洗四步（每步防一个坑）</h3>
+<table>
+  <tr><th>步骤</th><th>规则</th><th>防什么</th></tr>
+  <tr><td>caption 清洗</td><td>压缩空白、保留 5~200 字</td><td>文件名式无监督价值文本（"IMG_2024.jpg"）</td></tr>
+  <tr><td>图片校验</td><td>最小边 ≥64px、≥5KB、可解码</td><td>损坏图、图标、占位图</td></tr>
+  <tr><td>sha1 字节级去重</td><td>同图不同 URL 只留一份</td><td>重复图成为"最难负例" → loss 虚低、指标虚高</td></tr>
+  <tr><td>先 shuffle 再切分</td><td>1% 进 eval（1000 条）</td><td>近邻样本同时进 train/eval → 指标泄漏</td></tr>
+</table>
+<pre><span class="c"># scripts/prepare_data.py —— 校验 + 去重 + 断点续跑（核心段）</span>
+on_disk = {os.path.splitext(fn)[<span class="n">0</span>] <span class="k">for</span> fn <span class="k">in</span> os.listdir(image_dir)}
+<span class="c"># ↑ 断点续跑：磁盘已有图片的文件名即内容 sha1，预加载后</span>
+<span class="c">#   重复内容跳过写盘（省 I/O）但仍计入 records（已有图片被"收养"）</span>
+<span class="k">for</span> content, text <span class="k">in</span> iter_raw():           <span class="c"># 分块并发下载（每批 workers×20）</span>
+    digest = hashlib.sha1(content).hexdigest()
+    <span class="k">if</span> digest <span class="k">in</span> seen: <span class="k">continue</span>             <span class="c"># 字节级去重</span>
+    <span class="k">if</span> digest <span class="k">not</span> <span class="k">in</span> on_disk:
+        <span class="k">with</span> <span class="f">open</span>(os.path.join(image_dir, fname), <span class="s">"wb"</span>) <span class="k">as</span> f:
+            f.write(data)                        <span class="c"># 重编码 JPEG q95</span>
+    seen.add(digest)
+    records.append({<span class="s">"image"</span>: fname, <span class="s">"text"</span>: text})</pre>
+
+<!-- ============ 2 binpack ============ -->
+<h2 id="s2"><span class="step-no">2</span>binpack：让每步 token 数恒定</h2>
+<p>动态分辨率下每张图 token 数不同，逐 shuffle 组 batch 会让每步总 token 在 500~1100 间抖动——显存按峰值预留、step 时间不稳、DDP 慢卡拖快卡。binpack 在<strong>数据侧装箱</strong>，每桶（=一个 step）总 token ≈ bin_token。</p>
+<div class="grid2">
+  <div class="card"><h4>bin_token 的计价口径</h4><p><code>448 = 392/14 × 224/14</code>，最大业务图的 patch token 数。bin_token = 448×N 即"每桶容纳 N 张满配业务图"。双卡 4090 取 <b>448×32 = 14336</b>（24GB 显存反推）；8×H800 取 448×64 = 28672（文档业务口径）。</p></div>
+  <div class="card"><h4>在/离线两策略</h4><p><b>在线（业务）</b>：尺寸有上限、分布集中 → 流式贪心塞满即封箱，损耗 ≤1 张图/bin；<b>离线（开源长尾）</b>：先统计全量 token 数（结果缓存 <code>.tokencache.json</code>），shuffle 后 <code>binpacking.to_constant_volume</code> 全局装箱，填充率更高。</p></div>
+</div>
+<pre><span class="c"># blm_clip/binpack.py —— 在线组 bin（业务口径）</span>
+<span class="k">def</span> <span class="f">online_bin_packer</span>(src, token_fn, bin_token):
+    current_bin, current_tokens = [], <span class="n">0</span>
+    <span class="k">for</span> sample <span class="k">in</span> src:
+        t = token_fn(sample)                     <span class="c"># 按文件头尺寸估算 patch token 数</span>
+        <span class="k">if</span> current_tokens + t &gt; bin_token <span class="k">and</span> current_bin:
+            <span class="k">yield</span> current_bin                    <span class="c"># 再加就超预算 → 封箱</span>
+            current_bin, current_tokens = [], <span class="n">0</span>
+        current_bin.append(sample)
+        current_tokens += t
+    <span class="k">if</span> current_bin: <span class="k">yield</span> current_bin            <span class="c"># 尾箱也产出</span>
+
+<span class="c"># train.py —— DDP 各 rank 交错取 bin：每桶 token 一致 → 两卡 step 时间对齐</span>
+bins = bins[rank::dist.get_world_size()]</pre>
+<div class="warn"><b>缓存失效条件</b>：<code>train.jsonl.tokencache.json</code> 不会自动感知变化——数据增删或修改 <code>min_pixels/max_pixels/patch_size</code> 后必须删除重建，否则 binpack 拿错误 token 数装箱。</div>
+
+<!-- ============ 3 packing 与模型 ============ -->
+<h2 id="s3"><span class="step-no">3</span>packing 与双塔编码</h2>
+<p>每个 bin 进入模型前由 <code>BinCollator</code> 打包：所有图的 patch <strong>直接拼接</strong>（零 padding），文本按 batch 内最长 padding。图间隔离不靠 mask 张量，而是 grid_thw 推出的 <strong>cu_seqlens</strong> 边界表——注意力按段计算（块对角），图内部按 8×8 patch 窗口做 window index 重排注意力。</p>
+<div class="flow">
+  <div class="shape"><span class="dim">bin ≈ 10张图</span><span class="lbl">grid_thw [10,3]</span></div>
+  <div class="arrow">→<span class="lbl">packing</span></div>
+  <div class="shape"><span class="dim">[14336, 1176]</span><span class="lbl">零padding拼接</span></div>
+  <div class="arrow">→<span class="lbl">QwenViT-7B</span></div>
+  <div class="shape"><span class="dim">[3584, 3584]</span><span class="lbl">merger后token</span></div>
+  <div class="arrow">→<span class="lbl">逐图池化</span></div>
+  <div class="shape"><span class="dim">[10, 1024]</span><span class="lbl">img_z 单位向量</span></div>
+</div>
+<table>
+  <tr><th>组件</th><th>规格</th><th>关键参数</th></tr>
+  <tr><td>视觉塔</td><td>Qwen2.5-VL-7B 的 ViT（675M）</td><td>Conv3d 2×14×14 / mRoPE / 窗口注意力 / merger 2×2（输出 3584 维）</td></tr>
+  <tr><td>文本塔</td><td>BGE-M3（XLM-R-large，568M）</td><td>hidden 1024 / CLS 池化 / SentencePiece 词表（勿与 Qwen 混用）</td></tr>
+  <tr><td>共享空间</td><td>embed_dim = 1024</td><td>两侧各自 Linear 投影 + L2 归一化</td></tr>
+  <tr><td>SigLIP 标量</td><td>τ init 10（存 ln10）、b init −10</td><td>可学习、免 weight_decay</td></tr>
+</table>
+<pre><span class="c"># blm_siglip/models.py —— 视觉塔前向（merger 边界切分 + 池化）</span>
+feats = self.visual(pixel_values, grid_thw=grid_thw)
+<span class="k">if</span> <span class="k">not</span> torch.is_tensor(feats):
+    feats = feats.pooler_output        <span class="c"># transformers≥5.x：merger 后输出；</span>
+                                       <span class="c"># last_hidden_state 是 merger 前，别拿错</span>
+tokens_per_image = (grid_thw.prod(dim=<span class="n">1</span>) // self.merge_size ** <span class="n">2</span>).tolist()
+chunks = torch.<span class="f">split</span>(feats, tokens_per_image, dim=<span class="n">0</span>)      <span class="c"># t·gh·gw/4 边界切回每图</span>
+pooled = torch.<span class="f">stack</span>([c.mean(dim=<span class="n">0</span>) <span class="k">for</span> c <span class="k">in</span> chunks])      <span class="c"># 均值池化</span>
+<span class="k">return</span> self.proj(pooled.to(self.proj.weight.dtype))       <span class="c"># bf16→fp32 对齐后投影</span></pre>
+
+<!-- ============ 4 SigLIP 损失 ============ -->
+<h2 id="s4"><span class="step-no">4</span>SigLIP 损失：每格一个独立二分类</h2>
+<div class="formula">logit_ij = τ · cos(f_i, g_j) + b<br>
+L = − (1/N) Σ_ij log σ( z_ij · logit_ij )，z_ij = +1(配对) / −1(非配对)</div>
+<p>与 InfoNCE 的本质区别：InfoNCE 的分母是<strong>整行 softmax 归一</strong>（任何 key 变化都耦合整行梯度）；SigLIP 把 N×N 矩阵的<strong>每个格子当独立二分类</strong>——任意 key 的去留不影响其他格子。这带来三个工程红利：loss 可按 query 行局部计算（多卡无需全局归一）、小 batch 更鲁棒、τ+b 双参数比单温度更稳定。</p>
+<div class="note"><b>负偏置 b=−10 的作用</b>：矩阵中负对远多于正对（N²−N vs N），b=−10 让初始 logits 大幅偏负——正对要"爬坡"（训练初期正对 loss 大、负对≈0），防止负对被轻易压到 σ≈1 后梯度消失。实测：随机双塔 loss≈10.6，完美对齐 loss≈ln2≈0.69。</div>
+<pre><span class="c"># blm_siglip/losses.py —— 本地 query 行 × 全局 key 列</span>
+logits = logit_scale.exp() * query_z @ key_all.t() + logit_bias   <span class="c"># [n, Ng]</span>
+labels = -torch.ones_like(logits)                        <span class="c"># z=−1 默认负对</span>
+pos_cols = torch.arange(n) + rank * max_n                <span class="c"># 本卡正例在全局的列位置</span>
+labels[torch.arange(n), pos_cols] = <span class="n">1.0</span>
+pair_loss = -F.logsigmoid(labels * logits)               <span class="c"># 逐格 sigmoid</span>
+pair_loss = pair_loss * key_mask.unsqueeze(<span class="n">0</span>)            <span class="c"># 剔除填充 key 列（见下）</span>
+<span class="k">return</span> pair_loss.sum() / n                               <span class="c"># 按本地 query 数平均</span></pre>
+
+<!-- ============ 5 负例同步 ============ -->
+<h2 id="s5"><span class="step-no">5</span>多卡负例同步：变长 gather-with-grad</h2>
+<p>目标：每卡 query 看到全局负例（2 卡 ×2、8 卡 ×8），但<strong>编码算力各付各的</strong>——传的是 ~12KB 的 embedding 副本，不是原始数据。binpack 下各 bin 图片数不同（rank0 可能 10 张、rank1 只有 9 张），NCCL all_gather 要求形状一致，所以是<strong>变长 gather</strong>：</p>
+<pre><span class="c"># blm_siglip/losses.py —— 变长负例同步（三步）</span>
+<span class="c"># ① 交换各卡样本数（world 个 int32，通信量可忽略）</span>
+counts = gather_counts(n, img_z.device)        <span class="c"># 如 [10, 9]</span>
+max_n = <span class="f">max</span>(counts)                            <span class="c"># 10</span>
+
+<span class="c"># ② 零填充对齐后 all_gather，本卡位换回带计算图的真身</span>
+<span class="k">class</span> <span class="f">_GatherWithGrad</span>(torch.autograd.Function):
+    <span class="k">def</span> <span class="f">forward</span>(ctx, local_tensor, counts):
+        padded = cat([local_tensor, zeros(max_n - n_local, D)])  <span class="c"># 尾部补零</span>
+        dist.all_gather(gathered, padded)
+        gathered[ctx.rank] = padded            <span class="c"># 本卡份保留计算图（要回梯度）</span>
+        <span class="k">return</span> torch.<span class="f">cat</span>(gathered, dim=<span class="n">0</span>)       <span class="c"># 他卡份是常量副本（只当 key）</span>
+    <span class="k">def</span> <span class="f">backward</span>(ctx, grad_output):
+        start = ctx.rank * ctx.max_n
+        <span class="k">return</span> grad_output[start:start + ctx.n_local], <span class="k">None</span>  <span class="c"># 只回本卡有效行</span>
+
+<span class="c"># ③ 无效 key 列（填充行）用 mask 剔除出损失——数值验证：填充换成全1巨型相似度，loss 分毫不差</span>
+mask[r * max_n : r * max_n + counts[r]] = <span class="n">1.0</span></pre>
+<div class="grid2">
+  <div class="card"><h4>前向：rank1 数据在哪</h4><p>只出现在 loss 的 <b>key 列</b>（两个方向各一次）：i2t 里 txt_z¹ 占列、t2i 里 img_z¹ 占列，扮演"额外负例候选"。</p></div>
+  <div class="card"><h4>反向：梯度怎么分</h4><p>query 侧梯度完整回本卡；key 侧只有本卡真身那几行回梯度；他卡副本无梯度——他卡应得的梯度由它自己对称领取，最后 DDP all-reduce 平均汇合。</p></div>
+</div>
+
+<!-- ============ 6 超参与训练循环 ============ -->
+<h2 id="s6"><span class="step-no">6</span>超参数与训练循环</h2>
+<table>
+  <tr><th>项</th><th>值</th><th>理由</th></tr>
+  <tr><td>优化器</td><td>AdamW(β=0.9/0.98, eps=1e-6)</td><td>CLIP 系惯例，β2=0.98 对大 batch 对比更稳</td></tr>
+  <tr><td>视觉塔 / 文本塔 LR</td><td>1e-5（wd=0.2）</td><td>双塔均预训练，小 LR 保护表征</td></tr>
+  <tr><td>投影层 + τ/b LR</td><td>5e-5（<b>wd=0</b>）</td><td>新参数大 LR；标量加 wd 会扭曲语义</td></tr>
+  <tr><td>调度器</td><td>linear warmup 200 步 + cosine</td><td>防初期大梯度冲乱预训练权重</td></tr>
+  <tr><td>梯度累积</td><td>2 步（有效 batch ≈ 40 对）</td><td>补偿 bin_token 砍半的负例缺口</td></tr>
+  <tr><td>梯度裁剪 / 精度</td><td>1.0 / bf16 + 梯度检查点</td><td>24GB 显存前提（见第 7 章）</td></tr>
+  <tr><td>总步数</td><td>5000（≈2 epoch）</td><td>9.9 万样本 ÷ ~20 对/step</td></tr>
+</table>
+<pre><span class="c"># engine.py —— 一步训练的实际顺序</span>
+<span class="k">with</span> torch.autocast(device_type=<span class="s">"cuda"</span>, dtype=torch.bfloat16, enabled=<span class="k">True</span>):
+    img_z, txt_z, logit_scale, logit_bias = model(batch)      <span class="c"># 各卡独立编码本 bin</span>
+    loss = loss_fn(img_z, txt_z, logit_scale, logit_bias) / accum  <span class="c"># gather+SigLIP</span>
+loss.backward()                                  <span class="c"># 梯度切回本卡份；检查点重算激活</span>
+<span class="k">if</span> micro % accum == <span class="n">0</span>:                          <span class="c"># 每 2 个 micro-step 才更新</span>
+    grad_norm = clip_grad_norm_(model.parameters(), <span class="n">1.0</span>)  <span class="c"># 裁剪+记录范数</span>
+    optimizer.step(); scheduler.step()           <span class="c"># DDP 已自动 all-reduce 平均梯度</span>
+    optimizer.zero_grad(set_to_none=<span class="k">True</span>)</pre>
+
+<!-- ============ 7 显存账 ============ -->
+<h2 id="s7"><span class="step-no">7</span>显存账：bin_token 怎么按显存反推</h2>
+<table>
+  <tr><th>组成</th><th>计算</th><th>大小</th></tr>
+  <tr><td>固定开销</td><td>视觉 bf16 1.4G + 文本 fp32 2.3G + 梯度 3.7G + AdamW m+v 7.1G</td><td>~14.5GB</td></tr>
+  <tr><td>视觉激活（检查点）</td><td>32 层 × T × 1280 × 2B + 反向重算工作区</td><td>≈ T × 125KB</td></tr>
+  <tr><td>文本激活（检查点）</td><td>24 层 × (n×96) × 1024 × 2B</td><td>较小</td></tr>
+</table>
+<table>
+  <tr><th>bin 规模</th><th>token 数 T</th><th>峰值显存</th><th>结论</th></tr>
+  <tr><td>448×32（dual_4090 采用）</td><td>14,336</td><td>~17GB</td><td>✅ 24GB 安全</td></tr>
+  <tr><td>448×64（8×H800 档）</td><td>28,672</td><td>~19GB</td><td>✅ 80GB 从容</td></tr>
+  <tr><td>448×128（4090 天花板）</td><td>57,344</td><td>~24GB</td><td>⚠️ 极限</td></tr>
+  <tr><td>448×320</td><td>143,360</td><td>~35GB</td><td>❌ 4090 放不下 / ✅ H800</td></tr>
+</table>
+<div class="key"><b>调参原则</b>：显存不炸的前提下 bin_token 尽量大（负例更多、填充率更高），同时填充率 ≥95%；24GB 场景务必开梯度检查点（+30% 计算换激活减半以上）。</div>
+
+<!-- ============ 8 产物与监控 ============ -->
+<h2 id="s8"><span class="step-no">8</span>训练产物与健康标准</h2>
+<table>
+  <tr><th>产物</th><th>位置</th><th>内容</th></tr>
+  <tr><td>checkpoint</td><td><code>outputs/dual4090_v0/ckpt_step{N}.pt</code></td><td>模型+optimizer+config（轮转保留 3 个）；<b>视觉塔部分即 BLM ViT v1</b></td></tr>
+  <tr><td>metrics.jsonl</td><td>同目录</td><td>每 20 步：loss/lr/<b>τ 与 b 轨迹</b>/grad_norm/吞吐；评估结果同文件</td></tr>
+  <tr><td>train.log</td><td>同目录</td><td>完整控制台输出（tee 双写）</td></tr>
+  <tr><td>最终评估</td><td>训练结束自动跑</td><td>i2t/t2i R@1/5/10 + hit@5</td></tr>
+</table>
+<div class="grid2">
+  <div class="card"><h4>健康信号</h4><p>① 初始 loss ≈ 10.6（负偏置主导）随后持续下降；② τ 缓升、b 从 −10 回升；③ 双卡 it/s 一致、显存接近（binpack 生效）；④ 500 步 hit@5 显著超过随机基线 0.5%。</p></div>
+  <div class="card"><h4>异常排查顺序</h4><p>NCCL 卡住 → 查两卡 bin 数一致性；OOM → 确认 grad_checkpointing 已开 → 降 bin_token；loss 不降 → 看 metrics.jsonl 的 grad_norm 爆炸或归零。</p></div>
+</div>
+
+<!-- ============ 9 部署 ============ -->
+<h2 id="s9"><span class="step-no">9</span>AutoDL 部署速查</h2>
+<pre><span class="c"># ① 三样东西就位（数据盘 /root/autodl-tmp）</span>
+<span class="k">cd</span> /root/autodl-tmp && git clone https://github.com/cs-lb/BLM.git
+<span class="c"># ② 视觉权重 1.26GB 放 blm_siglip/assets/（注意是 assets 不是 asset）</span>
+<span class="c"># ③ 数据解包到 BLM/blm_clip/data（Mac 打包的 tar 警告 LIBARCHIVE.xattr 无害）</span>
+<span class="k">cd</span> BLM/blm_siglip && ln -sfn ../blm_clip/data data
+pip install -r requirements.txt
+<span class="c"># ④ 冒烟 → 正式（建议 tmux 包住防 SSH 断开）</span>
+bash scripts/train_dual4090.sh                 <span class="c"># 默认冒烟 20 步</span>
+SMOKE=<span class="n">0</span> bash scripts/train_dual4090.sh         <span class="c"># 正式 5000 步</span>
+<span class="c"># ⑤ 监控</span>
+tail -f outputs/dual4090_v0/train.log
+tail -f outputs/dual4090_v0/metrics.jsonl
+nvidia-smi -l <span class="n">5</span>                                 <span class="c"># 双卡利用率应都 &gt;90%</span></pre>
+<div class="note"><b>Mac 打包提醒</b>：macOS 的 bsdtar 会把 <code>com.apple.provenance</code> 扩展属性写进包，Linux tar 逐文件警告但不影响内容。以后用 <code>COPYFILE_DISABLE=1 tar czf ...</code> 可避免。</div>
+
+</main>
+</div>
+</body>
+</html>

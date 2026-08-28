@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>从图片到 Embedding：BLM ViT 全流程详解</title>
+<style>
+  :root {
+    --bg: #fafaf8; --card: #ffffff; --ink: #1f1f1d; --ink2: #5f5e5a; --ink3: #888780;
+    --line: #e6e4de; --accent: #534AB7; --accent-bg: #EEEDFE; --teal: #0F6E56; --teal-bg: #E1F5EE;
+    --amber: #854F0B; --amber-bg: #FAEEDA; --red: #A32D2D; --red-bg: #FCEBEB;
+    --code-bg: #282c34; --mono: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--ink); font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; line-height: 1.75; }
+  .layout { display: flex; max-width: 1280px; margin: 0 auto; }
+  nav { position: sticky; top: 0; width: 240px; height: 100vh; padding: 32px 20px; border-right: 1px solid var(--line); flex-shrink: 0; overflow-y: auto; background: var(--bg); }
+  nav h3 { font-size: 13px; color: var(--ink3); font-weight: 500; margin-bottom: 12px; letter-spacing: .05em; }
+  nav a { display: block; padding: 6px 10px; color: var(--ink2); text-decoration: none; font-size: 13.5px; border-radius: 6px; margin-bottom: 2px; }
+  nav a:hover { background: var(--accent-bg); color: var(--accent); }
+  main { flex: 1; padding: 40px 56px 120px; min-width: 0; }
+  h1 { font-size: 26px; font-weight: 600; margin-bottom: 8px; }
+  .subtitle { color: var(--ink2); font-size: 15px; margin-bottom: 40px; }
+  h2 { font-size: 20px; font-weight: 600; margin: 56px 0 6px; padding-top: 20px; border-top: 2px solid var(--line); }
+  h2 .step-no { display: inline-block; background: var(--accent); color: #fff; font-size: 13px; padding: 2px 10px; border-radius: 12px; margin-right: 10px; vertical-align: 3px; }
+  h3 { font-size: 15.5px; font-weight: 600; margin: 24px 0 8px; }
+  p { font-size: 14.5px; color: var(--ink); margin: 10px 0; }
+  .note { background: var(--amber-bg); border-left: 3px solid var(--amber); padding: 12px 16px; border-radius: 0 8px 8px 0; font-size: 13.5px; margin: 14px 0; color: #633806; }
+  .key { background: var(--teal-bg); border-left: 3px solid var(--teal); padding: 12px 16px; border-radius: 0 8px 8px 0; font-size: 13.5px; margin: 14px 0; color: #085041; }
+  .warn { background: var(--red-bg); border-left: 3px solid var(--red); padding: 12px 16px; border-radius: 0 8px 8px 0; font-size: 13.5px; margin: 14px 0; color: #791F1F; }
+  pre { background: var(--code-bg); color: #e8eaf0; border-radius: 10px; padding: 18px 20px; overflow-x: auto; font-family: var(--mono); font-size: 12.8px; line-height: 1.7; margin: 14px 0; }
+  code { font-family: var(--mono); }
+  pre .c { color: #7d8590; }            /* 注释 */
+  pre .k { color: #c678dd; }            /* 关键字 */
+  pre .s { color: #98c379; }            /* 字符串 */
+  pre .n { color: #d19a66; }            /* 数字 */
+  pre .f { color: #61afef; }            /* 函数 */
+  pre .hl { background: rgba(97,175,239,.18); display: block; margin: 0 -20px; padding: 0 20px; }
+  :not(pre) > code { background: var(--accent-bg); color: var(--accent); padding: 1px 6px; border-radius: 4px; font-size: 13px; }
+  /* 形状流转图 */
+  .flow { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 18px 0; }
+  .shape { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; font-family: var(--mono); font-size: 13px; text-align: center; }
+  .shape .dim { color: var(--accent); font-weight: 600; }
+  .shape .lbl { display: block; font-size: 11.5px; color: var(--ink3); font-family: -apple-system, "PingFang SC", sans-serif; }
+  .arrow { color: var(--ink3); font-size: 16px; }
+  .arrow .lbl { display: block; font-size: 11px; color: var(--teal); text-align: center; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 13.5px; }
+  th, td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; }
+  th { background: #f3f2ee; font-weight: 600; }
+  td code { font-size: 12px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 14px 0; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; }
+  .card h4 { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+  .card p, .card li { font-size: 13px; color: var(--ink2); }
+  ul, ol { padding-left: 22px; font-size: 14px; margin: 8px 0; }
+  li { margin: 4px 0; }
+  .tag { display: inline-block; font-size: 11.5px; padding: 1px 8px; border-radius: 10px; background: var(--accent-bg); color: var(--accent); margin-right: 6px; }
+  .tag.teal { background: var(--teal-bg); color: var(--teal); }
+  .tag.red { background: var(--red-bg); color: var(--red); }
+  @media (max-width: 900px) { nav { display: none; } main { padding: 24px; } }
+</style>
+</head>
+<body>
+<div class="layout">
+<nav>
+  <h3>全流程导航</h3>
+  <a href="#overview">0. 总览</a>
+  <a href="#s1">1. 数据输入</a>
+  <a href="#s2">2. smart_resize</a>
+  <a href="#s3">3. 归一化</a>
+  <a href="#s4">4. Qwen patch 重排</a>
+  <a href="#s5">5. packing 与 binpack</a>
+  <a href="#s6">6. QwenViT 内部</a>
+  <a href="#s7">7. 池化与投影</a>
+  <a href="#s8">8. 全程形状追踪</a>
+  <a href="#s9">9. 差异与扩展</a>
+</nav>
+<main>
+
+<h1>从图片到 Embedding：BLM ViT 全流程详解</h1>
+<p class="subtitle">以一张 700×525 的网页图为例，追踪它穿过 smart_resize、patch 重排、packing、QwenViT，最终变成一个 256 维向量的全过程。代码均取自 <code>blm_clip</code> 工程并配详细注释。</p>
+
+<!-- ================= 总览 ================= -->
+<h2 id="overview"><span class="step-no">0</span>全流程总览</h2>
+<div class="flow">
+  <div class="shape"><span class="dim">700×525×3</span><span class="lbl">原始图片</span></div>
+  <div class="arrow">→<span class="lbl">smart_resize</span></div>
+  <div class="shape"><span class="dim">672×504×3</span><span class="lbl">28的倍数</span></div>
+  <div class="arrow">→<span class="lbl">归一化</span></div>
+  <div class="shape"><span class="dim">[3, 672, 504]</span><span class="lbl">标准化张量</span></div>
+  <div class="arrow">→<span class="lbl">patch重排</span></div>
+  <div class="shape"><span class="dim">[864, 1176]</span><span class="lbl">Qwen格式patches</span></div>
+  <div class="arrow">→<span class="lbl">packing</span></div>
+  <div class="shape"><span class="dim">[Σpatches, 1176]</span><span class="lbl">整bin拼接</span></div>
+  <div class="arrow">→<span class="lbl">QwenViT</span></div>
+  <div class="shape"><span class="dim">[216, 2048]</span><span class="lbl">merger后token</span></div>
+  <div class="arrow">→<span class="lbl">池化+投影</span></div>
+  <div class="shape"><span class="dim">[256]</span><span class="lbl">最终embedding</span></div>
+</div>
+<div class="key"><b>三条主线记住这张图</b>：① <b>形状线</b>——像素如何一步步变成向量；② <b>边界线</b>——grid_thw 如何贯穿 resize、packing、注意力分段、池化切分四个环节；③ <b>参数线</b>——哪些步骤有学习参数（卷积、Transformer、merger、投影层），哪些是纯规则（resize、重排、拼接）。</div>
+
+<!-- ================= 1 数据输入 ================= -->
+<h2 id="s1"><span class="step-no">1</span>数据输入：jsonl 图文对</h2>
+<p>训练数据是 jsonl 索引 + 图片目录。数据集类只负责<strong>按路径读图</strong>，所有几何变换都推迟到 collator 在线完成——这就是动态分辨率方案"不预先统一尺寸"的底气。</p>
+<pre><span class="c"># data/train.jsonl（每行一条，image 为相对 images/ 的文件名）</span>
+{<span class="s">"image"</span>: <span class="s">"0f18a45....jpg"</span>, <span class="s">"text"</span>: <span class="s">"曝beyond往事 传&lt;人名&gt;因朱茵与&lt;人名&gt;绝交"</span>}
+
+<span class="c"># blm_clip/data.py —— 数据集与图片加载</span>
+<span class="k">class</span> <span class="f">ImageTextDataset</span>(Dataset):
+    <span class="k">def</span> <span class="f">__getitem__</span>(self, idx):
+        s = self.samples[idx]
+        <span class="c"># 返回 PIL 图片 + 原始文本，几何处理全部交给 collator</span>
+        <span class="k">return</span> {<span class="s">"image"</span>: load_pil_image(s, self.image_root), <span class="s">"text"</span>: s[<span class="s">"text"</span>]}
+
+<span class="k">def</span> <span class="f">load_pil_image</span>(sample, image_root):
+    path = sample[<span class="s">"image"</span>] <span class="k">if</span> os.path.isabs(sample[<span class="s">"image"</span>]) \
+        <span class="k">else</span> os.path.join(image_root, sample[<span class="s">"image"</span>])
+    <span class="k">with</span> <span class="f">open</span>(path, <span class="s">"rb"</span>) <span class="k">as</span> f:
+        <span class="c"># BytesIO 包装：读完即关闭文件，防止 DataLoader 多worker下句柄泄漏</span>
+        <span class="k">return</span> Image.<span class="f">open</span>(io.BytesIO(f.read())).convert(<span class="s">"RGB"</span>)</pre>
+<div class="flow">
+  <div class="shape"><span class="dim">"0f18a45....jpg"</span><span class="lbl">磁盘文件</span></div>
+  <div class="arrow">→</div>
+  <div class="shape"><span class="dim">PIL Image 700×525</span><span class="lbl">RGB 三通道</span></div>
+</div>
+
+<!-- ================= 2 smart_resize ================= -->
+<h2 id="s2"><span class="step-no">2</span>smart_resize：动态分辨率的第一环</h2>
+<p>目标：<strong>保留长宽比</strong>地把图片缩放到 28 的倍数，且 token 数落在预算内。为什么必须是 28？因为 QwenViT 的 patch 是 14×14，merger 再做 2×2 合并——<code>factor = patch_size × merge_size = 14 × 2 = 28</code>，保证后续两级切分都整除。</p>
+<pre><span class="c"># blm_clip/data.py —— 移植自 qwen_vl_utils 的官方实现</span>
+<span class="k">def</span> <span class="f">smart_resize</span>(height, width, factor, min_pixels, max_pixels):
+    <span class="c"># ① 先四舍五入到 factor(28) 的整数倍</span>
+    h_bar = <span class="f">max</span>(factor, <span class="f">int</span>(<span class="f">round</span>(height / factor)) * factor)
+    w_bar = <span class="f">max</span>(factor, <span class="f">int</span>(<span class="f">round</span>(width / factor)) * factor)
+
+    <span class="k">if</span> h_bar * w_bar &gt; max_pixels:      <span class="c"># ② 超出 token 预算：等比缩小</span>
+        beta = math.sqrt((height * width) / max_pixels)
+        h_bar = <span class="f">max</span>(factor, <span class="f">int</span>(math.floor(height / beta / factor)) * factor)
+        w_bar = <span class="f">max</span>(factor, <span class="f">int</span>(math.floor(width / beta / factor)) * factor)
+    <span class="k">elif</span> h_bar * w_bar &lt; min_pixels:    <span class="c"># ③ 低于下限：等比放大（小图也值得被看清）</span>
+        beta = math.sqrt(min_pixels / (height * width))
+        h_bar = <span class="f">int</span>(math.ceil(height * beta / factor)) * factor
+        w_bar = <span class="f">int</span>(math.ceil(width * beta / factor)) * factor
+    <span class="k">return</span> h_bar, w_bar</pre>
+<div class="grid2">
+  <div class="card"><h4>本例：700×525 网页图</h4>
+    <p>round(525/28)×28 = <b>532</b>？不对——round(525/28)=round(18.75)=19 → 19×28=<b>532</b>；round(700/28)=25 → <b>700</b>。面积 532×700=372,400 &gt; max_pixels(351,232)，触发等比缩小，最终 <b>672×504</b>（=24×28 × 18×28）。</p></div>
+  <div class="card"><h4>token 预算的含义</h4>
+    <p><code>max_pixels = 448×28²</code>，即最多 448 个 merged token（对齐文档业务图 392×224 的规模）；<code>min_pixels = 128×28²</code>，保证最小图也有 128 个 token 的表达能力。</p></div>
+</div>
+<div class="key"><b>对比传统 CLIP</b>：原版 CLIP 把任意图片强压到 224×224，横图被压扁、细节被抹掉。smart_resize 让"每张图按自己的长宽比被看见"，代价是 token 数变长——这正是后面 packing/binpack 必须存在的原因。</div>
+
+<!-- ================= 3 归一化 ================= -->
+<h2 id="s3"><span class="step-no">3</span>归一化：像素 → 标准化张量</h2>
+<pre><span class="c"># blm_clip/data.py —— Qwen2.5-VL 官方使用的 CLIP 归一化常数</span>
+IMAGE_MEAN = (<span class="n">0.48145466</span>, <span class="n">0.4578275</span>, <span class="n">0.40821073</span>)
+IMAGE_STD  = (<span class="n">0.26862954</span>, <span class="n">0.26130258</span>, <span class="n">0.27577711</span>)
+
+<span class="c"># collator 内对每张图：</span>
+arr = np.asarray(img.resize((rw, rh), Image.BICUBIC), dtype=np.float32) / <span class="n">255.0</span>
+arr = (arr - np.array(IMAGE_MEAN)) / np.array(IMAGE_STD)   <span class="c"># 逐通道 z-score</span>
+tensor = torch.from_numpy(arr).permute(<span class="n">2</span>, <span class="n">0</span>, <span class="n">1</span>).contiguous()  <span class="c"># HWC → CHW</span></pre>
+<div class="flow">
+  <div class="shape"><span class="dim">[672, 504, 3]</span><span class="lbl">uint8, 0~255, HWC</span></div>
+  <div class="arrow">→</div>
+  <div class="shape"><span class="dim">[3, 672, 504]</span><span class="lbl">float32, 均值0方差1, CHW</span></div>
+</div>
+
+<!-- ================= 4 patch 重排 ================= -->
+<h2 id="s4"><span class="step-no">4</span>image_to_qwen_patches：与官方逐一对齐的网格重排</h2>
+<p>这一步是整个数据通路<strong>最容易写错</strong>的地方：QwenViT 的 patch_embed 是 <code>Conv3d(kernel=2×14×14)</code>，且 merger 按 2×2 邻域分组，所以输入 patch 的排列顺序必须严格匹配官方的 reshape + transpose 规则，错一个维度，喂给卷积的就是错乱的像素。</p>
+<pre><span class="k">def</span> <span class="f">image_to_qwen_patches</span>(img, patch_size=<span class="n">14</span>, merge_size=<span class="n">2</span>, temporal_patch_size=<span class="n">2</span>):
+    <span class="c"># 输入 img: [C, H, W]，H、W 均为 28 的倍数（smart_resize 已保证）</span>
+    C, H, W = img.shape
+    gh, gw = H // patch_size, W // patch_size        <span class="c"># patch 网格：48 × 36</span>
+
+    <span class="c"># ① 图片的 temporal 维为 1，复制成 2 帧以适配 Conv3d 的时间核</span>
+    x = img.unsqueeze(<span class="n">0</span>).repeat(temporal_patch_size, <span class="n">1</span>, <span class="n">1</span>, <span class="n">1</span>)   <span class="c"># [2, C, H, W]</span>
+
+    <span class="c"># ② 按 (t, temporal, C, gh/2, 2, 14, gw/2, 2, 14) 切分</span>
+    x = x.<span class="f">reshape</span>(<span class="n">1</span>, temporal_patch_size, C,
+                  gh // merge_size, merge_size, patch_size,
+                  gw // merge_size, merge_size, patch_size)
+
+    <span class="c"># ③ 关键转置：把 2×2 merge 组挪到通道维前面 —— 与官方 processor 完全一致</span>
+    x = x.permute(<span class="n">0</span>, <span class="n">3</span>, <span class="n">6</span>, <span class="n">4</span>, <span class="n">7</span>, <span class="n">2</span>, <span class="n">1</span>, <span class="n">5</span>, <span class="n">8</span>)
+
+    <span class="c"># ④ 展平：每个 patch 变 1176 维（3通道 × 2帧 × 14 × 14）</span>
+    patches = x.<span class="f">reshape</span>(<span class="n">1</span> * gh * gw, C * temporal_patch_size * patch_size * patch_size)
+    grid_thw = torch.tensor([<span class="n">1</span>, gh, gw], dtype=torch.long)
+    <span class="k">return</span> patches, grid_thw</pre>
+<div class="flow">
+  <div class="shape"><span class="dim">[3, 672, 504]</span><span class="lbl">CHW 张量</span></div>
+  <div class="arrow">→<span class="lbl">切 14×14 patch</span></div>
+  <div class="shape"><span class="dim">48×36 网格</span><span class="lbl">gh=48, gw=36</span></div>
+  <div class="arrow">→<span class="lbl">重排展平</span></div>
+  <div class="shape"><span class="dim">[1728, 1176]</span><span class="lbl">1728=48×36 个 patch</span></div>
+  <div class="arrow">+</div>
+  <div class="shape"><span class="dim">grid_thw=[1,48,36]</span><span class="lbl">边界元信息（贯穿全程）</span></div>
+</div>
+<div class="note"><b>1176 的构成</b>：3（RGB）× 2（temporal 复制）× 14 × 14 = 1176。Conv3d 会把这个 1176 维向量映射为 ViT 的 hidden 维度（1280）。</div>
+
+<!-- ================= 5 packing 与 binpack ================= -->
+<h2 id="s5"><span class="step-no">5</span>packing 与 binpack：两个层级的"变长治理"</h2>
+<p>动态分辨率让每张图 patch 数不同，由此产生两级问题，分别由两个机制解决——这是整个 BLM 数据侧设计的精髓：</p>
+<table>
+  <tr><th>层级</th><th>机制</th><th>解决什么</th><th>代码位置</th></tr>
+  <tr><td>batch 内</td><td><b>packing</b></td><td>消除 padding 浪费（示例中省 43.5% 算力）</td><td><code>ClipCollator</code></td></tr>
+  <tr><td>step 间</td><td><b>binpack</b></td><td>每桶 token ≈ bin_token，GPU 利用率稳定</td><td><code>binpack.py</code></td></tr>
+</table>
+<pre><span class="c"># ① packing（ClipCollator）：bin 内所有图的 patch 直接拼接，零 padding</span>
+patch_list, grid_list = [], []
+<span class="k">for</span> b <span class="k">in</span> batch:
+    patches, grid_thw = self._process_image_qwenvit(b[<span class="s">"image"</span>])
+    patch_list.append(patches)
+    grid_list.append(grid_thw)
+image_inputs = (torch.<span class="f">cat</span>(patch_list, dim=<span class="n">0</span>),   <span class="c"># 注意是 cat 不是 stack！</span>
+                torch.<span class="f">stack</span>(grid_list, dim=<span class="n">0</span>)) <span class="c"># [B, 3] 每张图的 (t,gh,gw)</span>
+
+<span class="c"># ② binpack（binpack.py）：数据侧装箱，一个 bin = 一个训练 step</span>
+<span class="k">def</span> <span class="f">online_bin_packer</span>(src, token_fn, bin_token):
+    current_bin, current_tokens = [], <span class="n">0</span>
+    <span class="k">for</span> sample <span class="k">in</span> src:
+        t = token_fn(sample)
+        <span class="k">if</span> current_tokens + t &gt; bin_token <span class="k">and</span> current_bin:
+            <span class="k">yield</span> current_bin                <span class="c"># 再加就超预算 → 封箱</span>
+            current_bin, current_tokens = [], <span class="n">0</span>
+        current_bin.append(sample)
+        current_tokens += t
+    <span class="k">if</span> current_bin: <span class="k">yield</span> current_bin        <span class="c"># 尾箱也产出</span></pre>
+<div class="flow">
+  <div class="shape"><span class="dim">图1: 1728 patches</span><span class="lbl">672×504</span></div>
+  <div class="shape"><span class="dim">图2: 1288 patches</span><span class="lbl">另一尺寸</span></div>
+  <div class="shape"><span class="dim">图3: 2464 patches</span><span class="lbl">又一大图</span></div>
+  <div class="arrow">→<span class="lbl">cat 拼接</span></div>
+  <div class="shape"><span class="dim">[5480, 1176]</span><span class="lbl">零 padding，边界由 grid_thw 记录</span></div>
+</div>
+<div class="key"><b>边界去哪了？</b>grid_thw 是贯穿全程的"边界账本"：packing 时它记录每图的网格尺寸 → 模型内部据此推出 <b>cu_seqlens</b>（前缀和 [0, 1728, 3016, 5480]）→ 注意力按段计算（块对角，图间互不可见）→ 池化时按它切回每图。实测：<code>pixel_values.shape[0] == Σ(gh×gw)</code>，分毫不差。</div>
+
+<!-- ================= 6 QwenViT 内部 ================= -->
+<h2 id="s6"><span class="step-no">6</span>QwenViT 内部：Conv3d → 2D-RoPE → 窗口注意力</h2>
+<p>拼接好的 patch 序列进入视觉塔后发生四件事（全部由 transformers 官方实现完成，这也是选 QwenViT 而非自研 ViT 的原因）：</p>
+<div class="grid2">
+  <div class="card"><h4>① Conv3d patch 嵌入</h4><p><code>Conv3d(3, 1280, kernel=(2,14,14), stride=(2,14,14))</code> 把每个 1176 维 patch 映射为 1280 维 token。temporal 核为 2，正好吃掉我们复制的 2 帧。</p></div>
+  <div class="card"><h4>② 2D 旋转位置编码</h4><p>按每张图自己的 grid_thw 生成 (h, w) 二维 RoPE——<b>位置编码按图独立</b>，与拼接后的全局位置无关，这是 RoPE 配合 packing 的天然优势。</p></div>
+  <div class="card"><h4>③ window index 重排</h4><p>token 和位置编码按窗口 index 重排：窗口内做局部注意力（省算力），少数层做全局注意力；重排在 block 结束后按 reverse_indices 还原。</p></div>
+  <div class="card"><h4>④ cu_seqlens 分段注意力</h4><p>flash-attn varlen 接口只计算块对角部分：图 A 的 token 永远 attend 不到图 B。连 mask 都不物化，没有"算了再屏蔽"的浪费。</p></div>
+</div>
+<pre><span class="c"># blm_clip/models.py —— 我们只需要把官方格式喂进去</span>
+<span class="k">class</span> <span class="f">QwenViTVisionTower</span>(nn.Module):
+    <span class="k">def</span> <span class="f">__init__</span>(self, model_name, embed_dim, merge_size=<span class="n">2</span>):
+        base = _Base.from_pretrained(model_name, low_cpu_mem_usage=<span class="k">True</span>)
+        self.visual = base.visual          <span class="c"># 官方视觉塔：patch_embed+blocks+merger</span>
+        self.proj = nn.Linear(self.visual.config.out_hidden_size, embed_dim, bias=<span class="k">False</span>)
+
+    <span class="k">def</span> <span class="f">forward</span>(self, pixel_values, grid_thw):
+        feats = self.visual(pixel_values, grid_thw=grid_thw)
+        <span class="c"># transformers&gt;=5.x 返回 BaseModelOutputWithPooling：</span>
+        <span class="c">#   last_hidden_state = merger 前（Σgh·gw, 1280维）</span>
+        <span class="c">#   pooler_output     = merger 后（Σgh·gw/4, 2048维）← 取这个</span>
+        <span class="k">if</span> <span class="k">not</span> torch.is_tensor(feats):
+            feats = feats.pooler_output</pre>
+
+<!-- ================= 7 池化与投影 ================= -->
+<h2 id="s7"><span class="step-no">7</span>逐图池化 + 投影 + 归一化：向量的诞生</h2>
+<p>视觉塔输出的是<strong>变长的 patch token 序列</strong>，而对比学习需要<strong>每图一个定长向量</strong>。收口的三个动作：</p>
+<pre><span class="c"># blm_clip/models.py —— 池化切分 + 投影</span>
+<span class="c"># ① 按 grid_thw 算每图 merger 后 token 数：t×gh×gw/4（merger 做了 2×2 合并）</span>
+tokens_per_image = (grid_thw.prod(dim=<span class="n">1</span>) // (self.merge_size ** <span class="n">2</span>)).tolist()
+<span class="c"># 本例：1×48×36/4 = 432 个 token</span>
+
+<span class="c"># ② 切回每图，均值池化为一个向量（学习版简化；文档流程图为 attention pooling）</span>
+chunks = torch.<span class="f">split</span>(feats, tokens_per_image, dim=<span class="n">0</span>)
+pooled = torch.<span class="f">stack</span>([c.mean(dim=<span class="n">0</span>) <span class="k">for</span> c <span class="k">in</span> chunks], dim=<span class="n">0</span>)   <span class="c"># [B, 2048]</span>
+pooled = pooled.to(self.proj.weight.dtype)   <span class="c"># bf16 视觉塔 → fp32 投影层对齐</span>
+
+<span class="c"># ③ 投影到共享嵌入空间 + L2 归一化</span>
+z = self.proj(pooled)                        <span class="c"># [B, embed_dim=256]</span>
+<span class="k">return</span> F.<span class="f">normalize</span>(z, dim=-<span class="n">1</span>)              <span class="c"># 余弦相似度的前提：单位向量</span></pre>
+<div class="flow">
+  <div class="shape"><span class="dim">[432, 2048]</span><span class="lbl">本图的 merger 后 token</span></div>
+  <div class="arrow">→<span class="lbl">mean pooling</span></div>
+  <div class="shape"><span class="dim">[2048]</span><span class="lbl">全局视觉表征</span></div>
+  <div class="arrow">→<span class="lbl">Linear 2048→256</span></div>
+  <div class="shape"><span class="dim">[256]</span><span class="lbl">投影到共享空间</span></div>
+  <div class="arrow">→<span class="lbl">L2 normalize</span></div>
+  <div class="shape"><span class="dim">[256], ‖z‖=1</span><span class="lbl">最终 embedding</span></div>
+</div>
+<div class="warn"><b>为什么必须归一化</b>：InfoNCE 的相似度是余弦相似度，只有向量模长为 1，点积才等于余弦；同时可学习温度 τ（init 1/0.07，clamp exp≤100）在这个归一化空间里缩放 logits，控制 softmax 分布的陡峭程度。</div>
+
+<!-- ================= 8 形状追踪 ================= -->
+<h2 id="s8"><span class="step-no">8</span>全程形状追踪表（一张图走完所有步骤）</h2>
+<table>
+  <tr><th>步骤</th><th>形状</th><th>关键数字来源</th><th>有学习参数？</th></tr>
+  <tr><td>原始图片</td><td>700×525×3</td><td>磁盘文件</td><td>—</td></tr>
+  <tr><td>smart_resize</td><td>672×504×3</td><td>28 的倍数 + token 预算</td><td>—</td></tr>
+  <tr><td>归一化 + CHW</td><td>[3, 672, 504]</td><td>CLIP mean/std</td><td>—</td></tr>
+  <tr><td>patch 重排</td><td>[1728, 1176]</td><td>gh·gw = 48×36；1176 = 3×2×14²</td><td>—</td></tr>
+  <tr><td>packing（5图bin）</td><td>[6680, 1176]</td><td>Σ gh·gw，零 padding</td><td>—</td></tr>
+  <tr><td>Conv3d 嵌入</td><td>[6680, 1280]</td><td>hidden_size=1280</td><td>✅ patch_embed</td></tr>
+  <tr><td>Transformer blocks</td><td>[6680, 1280]</td><td>窗口注意力，cu_seqlens 分段</td><td>✅ blocks</td></tr>
+  <tr><td>merger</td><td>[1670, 2048]</td><td>Σ gh·gw/4；out_hidden=2048</td><td>✅ merger MLP</td></tr>
+  <tr><td>逐图均值池化</td><td>[5, 2048]</td><td>按 [420,322,220,432,276] 切分</td><td>—</td></tr>
+  <tr><td>投影 + 归一化</td><td>[5, 256]</td><td>embed_dim=256，‖z‖=1</td><td>✅ proj</td></tr>
+</table>
+<div class="note"><b>一张图 vs 一个 bin</b>：表中前 4 行是单图视角，第 5 行起是 bin（batch）视角——5 张不同尺寸的图拼成 6680 个 patch 一起过塔，出来再按边界切回 5 个向量。grid_thw 是两种视角之间唯一的翻译官。</div>
+
+<!-- ================= 9 差异与扩展 ================= -->
+<h2 id="s9"><span class="step-no">9</span>与文档流程的差异及扩展方向</h2>
+<table>
+  <tr><th>环节</th><th>文档流程图</th><th>本工程实现</th><th>说明</th></tr>
+  <tr><td>最终池化</td><td>attention pooling</td><td>均值池化</td><td>学习版简化；attention pooling 可作为第一个消融实验（mean vs attn 的 hit@5 对比）</td></tr>
+  <tr><td>窗口机制</td><td>token/位置编码按 window index 重排</td><td>由官方视觉塔内部完成</td><td>选 QwenViT 的核心收益：窗口注意力 + 2D-RoPE 开箱即用</td></tr>
+  <tr><td>bin 组织</td><td>在线/离线 binpack</td><td>完全一致（在线贪心 + to_constant_volume 全局装箱）</td><td>实测填充率 89.7%（小 bin）；正式 bin_token=28672 时 ~98%</td></tr>
+  <tr><td>细粒度</td><td>FG-CLIP 区域对齐</td><td>独立工程 <code>fg_clip/</code> 实现</td><td>区域特征取 merger 前 token（last_hidden_state）做网格池化</td></tr>
+</table>
+<div class="key"><b>一句话总结</b>：这条链路的设计哲学是——<b>规则部分（resize/重排/拼接/切分）零参数、与官方逐一对齐；学习部分（卷积/Transformer/merger/投影）全部交给预训练权重 + 判别式学习率</b>。动态分辨率的灵活性由 packing/batch 内零浪费 和 binpack/step 间稳吞吐 两个机制兜底，最后用一次池化把变长世界收拢为定长向量。</div>
+
+</main>
+</div>
+</body>
+</html>
