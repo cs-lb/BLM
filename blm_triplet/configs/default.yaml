@@ -1,0 +1,48 @@
+# ============================================================
+# BLM ViT v1→v2：三元损失 + Reranker 蒸馏 配置
+# ============================================================
+
+seed: 42
+
+model:
+  vision_type: qwenvit
+  vision_name: Qwen/Qwen2.5-VL-7B-Instruct
+  visual_weights: ../blm_siglip/assets/qwenvit_7b_visual.pt
+  timm_name: vit_base_patch16_224.augreg_in21k
+  freeze_vision: false                 # v2 继续联合微调（也可先冻结视觉塔做小步验证）
+  text_name: BAAI/bge-m3
+  embed_dim: 1024
+  siglip_init_t: 10.0                  # v1 ckpt 会覆盖
+  siglip_init_b: -10.0
+
+data:
+  triplet_jsonl: data/triplets.jsonl   # build_triplets.py 产物
+  image_root: data/images
+  min_pixels: 100352
+  max_pixels: 351232
+  patch_size: 14
+  merge_size: 2
+  num_workers: 4
+
+train:
+  output_dir: outputs/blm_vit_v2
+  batch_size: 8                        # 每步 8 个 anchor（×K 候选）
+  lr_vision: 5.0e-6                    # v2 是精修，LR 比 v1 再降一档
+  lr_text: 5.0e-6
+  lr_proj: 2.0e-5
+  weight_decay: 0.1
+  betas: [0.9, 0.98]
+  eps: 1.0e-6
+  warmup_steps: 100
+  max_steps: 3000
+  grad_clip: 1.0
+  bf16: true
+  # ----- 损失 -----
+  margin: 0.2                          # 三元损失 margin
+  lambda_triplet: 1.0                  # 相对排序（主）
+  lambda_distill: 0.5                  # 绝对标定（辅），教师噪声大时降到 0.2~0.3
+  # -----
+  log_every: 20
+  eval_every: 500
+  save_every: 500
+  max_checkpoints: 3
